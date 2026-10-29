@@ -183,13 +183,14 @@ ac_resolve_kind_t ac_resolve(const ac_state_t *list, size_t n, uint8_t default_f
             dt = abs((int)c->temp_half - (int)desired->temp_half);
             du = abs((int)c->temp_half - (int)user_target_half);
         }
+        /* The temperature is the controlled quantity: it is matched first, fan/swing second. */
         bool better = false;
-        if (tier < best_tier) {
+        if (dt < best_dt) {
             better = true;
-        } else if (tier == best_tier) {
-            if (dt < best_dt) {
+        } else if (dt == best_dt) {
+            if (tier < best_tier) {
                 better = true;
-            } else if (dt == best_dt) {
+            } else if (tier == best_tier) {
                 if (du < best_du) {
                     better = true;
                 } else if (du == best_du && best >= 0) {
@@ -213,8 +214,8 @@ ac_resolve_kind_t ac_resolve(const ac_state_t *list, size_t n, uint8_t default_f
         return AC_RESOLVE_NONE;
     }
     *chosen = list[best];
-    if (best_tier == 0 && best_dt == 0) {
-        return AC_RESOLVE_EXACT;
+    if (best_tier != 0) {
+        return AC_RESOLVE_FALLBACK_FAN_SWING;
     }
-    return best_tier == 0 ? AC_RESOLVE_NEAREST_TEMP : AC_RESOLVE_FALLBACK_FAN_SWING;
+    return best_dt == 0 ? AC_RESOLVE_EXACT : AC_RESOLVE_NEAREST_TEMP;
 }

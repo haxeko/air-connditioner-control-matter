@@ -99,10 +99,10 @@ menu "AC Matter IR controller"
     menu "BOOT button (configuration portal)"
         config APP_BUTTON_DEBOUNCE_MS
             int "Debounce time (ms)"
-            range 10 100
+            range 30 50
             default 40
             help
-                The specification asks for 30-50 ms.
+                A level change of the BOOT button is accepted after it has been stable this long.
 
         config APP_BUTTON_PRESS_COUNT
             int "Number of short presses"

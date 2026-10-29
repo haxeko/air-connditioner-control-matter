@@ -118,10 +118,13 @@ void climate_algo_step(climate_algo_t *a, const climate_params_t *p, const clima
     bool ok;
     uint8_t ac_mode = ac_mode_of(in->user_mode, &ok);
     if (in->user_mode == CLIMATE_MODE_OFF || !ok) {
+        /* The user's Off wins; nothing here can switch the AC on again. A later On starts
+         * without a stale correction. */
         out->desired.power = 0;
         out->reason = CLIMATE_REASON_OFF;
-        out->offset_centi = a->offset_centi;
+        a->offset_centi = 0;
         a->comp_active = false;
+        a->last_ac_mode = 0xFF;
         return;
     }
     if (ac_mode != a->last_ac_mode) {

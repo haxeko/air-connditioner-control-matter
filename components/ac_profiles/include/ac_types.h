@@ -90,9 +90,11 @@ typedef enum {
  * Choose the learned state to transmit for `desired` (raw profiles may only send learned states).
  * - power off -> the learned "off" code, otherwise none;
  * - same mode only (never another mode);
- * - fan/swing preference: requested, then profile defaults, then any;
- * - temperature: nearest learned; ties go to the one closer to user_target_half, then the
- *   energy-saving side (higher for cool/dry, lower for heat).
+ * - temperature first: nearest learned temperature;
+ * - then fan/swing: requested, requested fan + default swing, default fan + requested swing,
+ *   defaults, anything else;
+ * - remaining ties: closer to user_target_half, then the energy-saving side (higher for
+ *   cool/dry, lower for heat).
  */
 ac_resolve_kind_t ac_resolve(const ac_state_t *list, size_t n, uint8_t default_fan, uint8_t default_swing,
                              const ac_state_t *desired, uint8_t user_target_half, ac_state_t *chosen);
