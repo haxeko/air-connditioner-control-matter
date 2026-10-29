@@ -22,3 +22,9 @@ project(ac_matter_ir)
 idf_build_set_property(CXX_COMPILE_OPTIONS "-std=gnu++17;-Os;-DCHIP_HAVE_CONFIG_H" APPEND)
 idf_build_set_property(C_COMPILE_OPTIONS "-Os" APPEND)
 idf_build_set_property(COMPILE_OPTIONS "-Wno-format-nonliteral;-Wno-format-security" APPEND)
+
+# IPv4 strong host model (configuration portal only reachable from the SoftAP side), injected into
+# lwIP with the documented ESP-IDF mechanism for custom hooks (api-guides/lwip.rst "Customized lwIP Hooks").
+idf_component_get_property(lwip lwip COMPONENT_LIB)
+target_compile_options(${lwip} PRIVATE "-I${CMAKE_CURRENT_LIST_DIR}/components/wifi_config/lwip_hooks")
+target_compile_definitions(${lwip} PRIVATE "ESP_IDF_LWIP_HOOK_FILENAME=\"app_lwip_hooks.h\"")

@@ -514,6 +514,18 @@ uint32_t wifi_config_ap_ip4(void)
     return ip.ip.addr;
 }
 
+bool wifi_config_is_ap_client(uint32_t ip4)
+{
+    if (s_ap_netif == NULL) {
+        return false;
+    }
+    esp_netif_ip_info_t ip;
+    if (esp_netif_get_ip_info(s_ap_netif, &ip) != ESP_OK || ip.ip.addr == 0 || ip.netmask.addr == 0) {
+        return false;
+    }
+    return ip4 != ip.ip.addr && (ip4 & ip.netmask.addr) == (ip.ip.addr & ip.netmask.addr);
+}
+
 bool wifi_config_is_ap_address(uint32_t ip4)
 {
     uint32_t ap = wifi_config_ap_ip4();

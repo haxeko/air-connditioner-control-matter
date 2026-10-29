@@ -98,6 +98,8 @@ esp_err_t wifi_config_set_ap_password(const char *password);
 bool wifi_config_is_ap_address(uint32_t ip4);
 /** SoftAP IPv4 address (network byte order), 0 if not available. */
 uint32_t wifi_config_ap_ip4(void);
+/** True if `ip4` (network byte order) is a client address inside the SoftAP subnet. */
+bool wifi_config_is_ap_client(uint32_t ip4);
 
 /* Implemented in wifi_chip_bridge.cpp: runs on the CHIP thread. */
 esp_err_t wifi_chip_connect_sta(const char *ssid, const char *password);

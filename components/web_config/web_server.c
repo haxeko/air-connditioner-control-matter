@@ -51,12 +51,13 @@ typedef struct {
 /* Access control                                                                               */
 /* ------------------------------------------------------------------------------------------ */
 
-/** Local IPv4 address of a connected socket (IPv4-mapped IPv6 on the dual-stack listener). */
-static bool socket_local_ip4(int sockfd, uint32_t *out)
+/** IPv4 address of a connected socket's local (or peer) end; IPv4-mapped IPv6 on the dual-stack listener. */
+static bool socket_ip4(int sockfd, bool peer, uint32_t *out)
 {
     struct sockaddr_storage ss;
     socklen_t len = sizeof(ss);
-    if (getsockname(sockfd, (struct sockaddr *)&ss, &len) != 0) {
+    int r = peer ? getpeername(sockfd, (struct sockaddr *)&ss, &len) : getsockname(sockfd, (struct sockaddr *)&ss, &len);
+    if (r != 0) {
         return false;
     }
     if (ss.ss_family == AF_INET) {
@@ -76,14 +77,20 @@ static bool socket_local_ip4(int sockfd, uint32_t *out)
     return false;
 }
 
-/** Connection arrived on the SoftAP interface while the portal is open. */
+/**
+ * Connection arrived on the SoftAP interface while the portal is open: addressed to the AP address,
+ * from a client of the AP subnet. Packets for the AP address that arrive on the station interface
+ * are already dropped in lwIP (strong host hook, components/wifi_config/ip4_guard.c).
+ */
 static bool socket_on_portal(int sockfd)
 {
     if (!wifi_config_portal_is_open()) {
         return false;
     }
     uint32_t local = 0;
-    return socket_local_ip4(sockfd, &local) && wifi_config_is_ap_address(local);
+    uint32_t peer = 0;
+    return socket_ip4(sockfd, false, &local) && wifi_config_is_ap_address(local) && socket_ip4(sockfd, true, &peer) &&
+        wifi_config_is_ap_client(peer);
 }
 
 static esp_err_t on_open(httpd_handle_t hd, int sockfd)
