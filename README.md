@@ -452,6 +452,35 @@ học IR hoặc thử Wi-Fi mới).
 Ghi chú: firmware **không** khẳng định vẫn đọc được cảm biến Thread khi hub là Border Router duy nhất và hub
 bị tắt – khi đó không còn đường IPv6 tới mạng Thread.
 
+### 9.4 Quy trình nghiệm thu trên phần cứng
+
+Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng thái.
+
+1. **Khởi động hai vai trò** – log có `thermostat endpoint 1 …` và
+   `commissioner ready: fabric index …, fabric 0x…, node 0x… (created)`; lần khởi động sau là `(restored)`
+   với cùng fabric ID (không tạo fabric mới).
+2. **BOOT** – nhấn 1 lần, rồi 2 lần: không có log `portal open`. Nhấn 3 lần trong 1,5 s: log
+   `portal open: SSID AC-Matter-XXXX`. Nhấn 3 lần lần nữa: `portal already open: lifetime extended`. Giữ nút
+   lâu: không có gì xảy ra (không factory reset).
+3. **Ghép cảm biến** – theo bước 5; trang Cảm biến hiển thị endpoint và giá trị đọc thử; sau khi Lưu, trạng
+   thái “Đã subscribe”, log `subscription … established: interval a..b s, stale after c s`.
+4. **Cảm biến vẫn chạy ở hệ sinh thái cũ** – kiểm tra cảm biến vẫn cập nhật trong ứng dụng gốc.
+5. **AP+STA** – khi đang mở cấu hình, ứng dụng nhà vẫn điều khiển được thermostat và nhiệt độ vẫn cập nhật
+   (tuổi dữ liệu trên Tổng quan không tăng quá chu kỳ báo cáo).
+6. **Thermostat** – đổi nhiệt độ đặt/chế độ trong ứng dụng nhà: trang Tổng quan hiển thị “Trạng thái cần gửi
+   qua IR”, sau ~1,5 s “Đã phát IR”; máy lạnh bíp. Đặt nhiệt độ ngoài dải đã học bị ứng dụng từ chối.
+7. **Mất điện** – rút điện, cắm lại: thermostat vẫn trong ứng dụng nhà, cảm biến tự subscribe lại (không ghép
+   lại), profile IR còn nguyên, nhiệt độ hiển thị “Không khả dụng” cho tới báo cáo đầu tiên.
+8. **Mất cảm biến** – tắt nguồn cảm biến: sau thời gian “Coi là mất sau” trên trang Cảm biến, `LocalTemperature`
+   trong ứng dụng nhà thành trống/không rõ, lý do thuật toán “Không có nhiệt độ hợp lệ: ngừng bù”, setpoint IR
+   trở về đúng nhiệt độ đặt (không phát lệnh bù sai).
+9. **Off ưu tiên** – ở chế độ Theo cảm biến ngoài, phòng nóng, chọn Tắt trong ứng dụng: IR Tắt phát ngay; chờ
+   quá chu kỳ bù: không có lệnh IR nào khác.
+10. **Không phát tổ hợp chưa học** – đặt nhiệt độ chưa học: thiết bị phát nhiệt độ đã học gần nhất và ghi
+    “dùng nhiệt độ đã học gần nhất”; chế độ chưa học không chọn được.
+11. **Không Internet** – rút dây WAN của router: điều khiển từ điện thoại trong mạng nhà và cập nhật nhiệt độ
+    cảm biến vẫn hoạt động (điều khiển từ xa ngoài nhà thì phụ thuộc hub của hệ sinh thái).
+
 ---
 
 ## 10. Giới hạn đã biết

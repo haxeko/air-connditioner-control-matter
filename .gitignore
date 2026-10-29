@@ -6,3 +6,4 @@ sdkconfig.old
 __pycache__/
 test/host/build/
 .vscode/
+build_variant/

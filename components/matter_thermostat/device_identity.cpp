@@ -117,6 +117,8 @@ CHIP_ERROR DeviceIdentityProvider::GetSetupDiscriminator(uint16_t & setupDiscrim
     return CHIP_NO_ERROR;
 }
 
+/* The identity is generated once per device and is read-only afterwards (same contract as the
+ * SDK's factory-data providers, whose setters also report CHIP_ERROR_NOT_IMPLEMENTED). */
 CHIP_ERROR DeviceIdentityProvider::SetSetupDiscriminator(uint16_t setupDiscriminator)
 {
     (void)setupDiscriminator;

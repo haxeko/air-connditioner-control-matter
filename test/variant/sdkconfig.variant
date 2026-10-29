@@ -1,0 +1,8 @@
+# Build variant used to compile the optional code paths (not for production):
+#   idf.py -B build_variant -D SDKCONFIG=build_variant/sdkconfig \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;test/variant/sdkconfig.variant" build
+CONFIG_APP_LOCAL_SENSOR_SHT4X=y
+CONFIG_APP_TEST_SIMULATED_SENSOR=y
+CONFIG_APP_STATUS_LED_GPIO=2
+CONFIG_APP_IR_TX_INVERT=y
+CONFIG_APP_IR_RX_ACTIVE_LOW=n
