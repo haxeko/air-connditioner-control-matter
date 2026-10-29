@@ -56,7 +56,7 @@ typedef struct {
     uint32_t superseded;       /* pending command replaced by a newer one before transmission */
     int64_t last_sent_us;      /* 0 = never */
     ir_source_t last_source;
-    char last_label[48];
+    char last_label[64];
     esp_err_t last_error;
     uint16_t carrier_hz;
 } ir_tx_status_t;

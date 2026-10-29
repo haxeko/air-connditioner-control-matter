@@ -469,6 +469,7 @@ void PairingWatchdog(System::Layer *, void *)
 /* ------------------------------------------------------------------------------------------ */
 
 CurrentFabricRemover * gRemover = nullptr;
+commissioner_removed_cb_t gRemovedCb = nullptr;
 
 void OnRemoveDone(void * context, NodeId remoteNodeId, CHIP_ERROR status)
 {
@@ -486,6 +487,9 @@ void OnRemoveDone(void * context, NodeId remoteNodeId, CHIP_ERROR status)
         gProgress.updated_us = app_time_us();
     } else {
         SetError(COMMISSIONER_FAILED, "Gửi RemoveFabric tới cảm biến thất bại (cảm biến không phản hồi?)", status);
+    }
+    if (gRemovedCb != nullptr) {
+        gRemovedCb(remoteNodeId, status == CHIP_NO_ERROR);
     }
 }
 
@@ -910,4 +914,9 @@ extern "C" esp_err_t matter_commissioner_remove_node(uint64_t node_id)
     }
     ResetProgress(COMMISSIONER_REMOVING);
     return ScheduleWithNode(DoRemove, node_id);
+}
+
+extern "C" void matter_commissioner_set_removed_cb(commissioner_removed_cb_t cb)
+{
+    gRemovedCb = cb;
 }

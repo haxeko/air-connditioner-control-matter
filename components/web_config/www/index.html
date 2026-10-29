@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Cấu hình máy lạnh Matter</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">❄</span>
+    <div><h1 id="dev-name">Máy lạnh IR</h1><small id="dev-ver" class="muted"></small></div>
+  </div>
+  <div class="top-actions">
+    <span id="portal-left" class="muted"></span>
+    <button id="btn-extend" class="btn small" type="button">Gia hạn</button>
+    <button id="btn-exit" class="btn danger small" type="button">Thoát cấu hình</button>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs" aria-label="Trang">
+  <button type="button" data-page="overview" class="active">Tổng quan</button>
+  <button type="button" data-page="wifi">Wi-Fi</button>
+  <button type="button" data-page="home">Nhà thông minh</button>
+  <button type="button" data-page="sensor">Cảm biến Matter</button>
+  <button type="button" data-page="ac">Máy lạnh</button>
+  <button type="button" data-page="algo">Thuật toán</button>
+  <button type="button" data-page="diag">Chẩn đoán</button>
+</nav>
+
+<div id="banner-offline" class="banner err" hidden>Mất kết nối với thiết bị. Wi-Fi cấu hình có thể đã tắt: nhấn nút BOOT 3 lần để mở lại, rồi kết nối lại điện thoại.</div>
+<div id="banner-test" class="banner warn" hidden>CHẾ ĐỘ THỬ NGHIỆM: firmware được build với cảm biến giả lập (CONFIG_APP_TEST_SIMULATED_SENSOR). Không dùng cho máy lạnh thật.</div>
+<div id="banner-closed" class="banner info" hidden>Đã thoát cấu hình. Wi-Fi cấu hình đã tắt; thiết bị tiếp tục hoạt động qua Wi-Fi nhà. Nhấn BOOT 3 lần để mở lại.</div>
+
+<main>
+<!-- ======================================================================= Tổng quan -->
+<section id="page-overview" class="page">
+  <div class="grid">
+    <div class="card">
+      <h2>Nhiệt độ phòng</h2>
+      <div class="big" id="ov-temp">--</div>
+      <dl class="kv">
+        <dt>Nguồn</dt><dd id="ov-temp-src">-</dd>
+        <dt>Tuổi dữ liệu</dt><dd id="ov-temp-age">-</dd>
+        <dt>Cảm biến</dt><dd id="ov-sensor">-</dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h2>Máy lạnh</h2>
+      <dl class="kv">
+        <dt>Chế độ (từ ứng dụng nhà)</dt><dd id="ov-mode">-</dd>
+        <dt>Nhiệt độ đặt của bạn</dt><dd id="ov-target">-</dd>
+        <dt>Trạng thái cần gửi qua IR</dt><dd id="ov-desired">-</dd>
+        <dt>Cách điều khiển</dt><dd id="ov-control">-</dd>
+        <dt>Thuật toán</dt><dd id="ov-reason">-</dd>
+        <dt>Profile</dt><dd id="ov-profile">-</dd>
+      </dl>
+      <div id="ov-notready" class="warn" hidden></div>
+    </div>
+    <div class="card">
+      <h2>Lệnh IR cuối</h2>
+      <div id="ov-ir-label" class="mono">-</div>
+      <dl class="kv">
+        <dt>Đã phát IR</dt><dd id="ov-ir-age">-</dd>
+        <dt>Đang chờ phát</dt><dd id="ov-ir-pending">-</dd>
+        <dt>Thống kê</dt><dd id="ov-ir-stats">-</dd>
+      </dl>
+      <div id="ov-ir-err" class="err" hidden></div>
+      <p class="note">“Đã phát IR” chỉ có nghĩa LED hồng ngoại đã phát tín hiệu. Remote máy lạnh là một chiều nên thiết bị không biết máy lạnh đã nhận hay chưa: hãy để ý tiếng bíp hoặc màn hình của máy lạnh.</p>
+    </div>
+    <div class="card">
+      <h2>Kết nối</h2>
+      <dl class="kv">
+        <dt>Wi-Fi nhà</dt><dd id="ov-wifi">-</dd>
+        <dt>Địa chỉ IP</dt><dd id="ov-ip">-</dd>
+        <dt>Hệ sinh thái nhà (Matter)</dt><dd id="ov-matter">-</dd>
+        <dt>Fabric riêng cho cảm biến</dt><dd id="ov-fabb">-</dd>
+        <dt>Thời gian chạy</dt><dd id="ov-uptime">-</dd>
+        <dt>Lỗi đã ghi nhận</dt><dd id="ov-errors">-</dd>
+      </dl>
+      <div id="ov-restart" class="warn" hidden>Profile đang dùng có giới hạn nhiệt độ/chế độ khác với thermostat Matter hiện tại. Khởi động lại để áp dụng (trang Máy lạnh).</div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= Wi-Fi -->
+<section id="page-wifi" class="page" hidden>
+  <div class="grid">
+    <div class="card">
+      <h2>Wi-Fi nhà (STA)</h2>
+      <dl class="kv">
+        <dt>Mạng</dt><dd id="wf-ssid">-</dd>
+        <dt>Trạng thái</dt><dd id="wf-state">-</dd>
+        <dt>IPv4</dt><dd id="wf-ip4">-</dd>
+        <dt>IPv6</dt><dd id="wf-ip6" class="mono small pre">-</dd>
+        <dt>Cường độ / kênh</dt><dd id="wf-rssi">-</dd>
+      </dl>
+      <div id="wf-job" class="info" hidden></div>
+      <div id="wf-conflict" class="warn" hidden>Mạng nhà đang dùng dải 192.168.4.x, trùng với Wi-Fi cấu hình. Thiết bị vẫn chạy nhưng khi đang mở cấu hình có thể không truy cập được một số máy trong mạng nhà. Nên đổi dải IP của router.</div>
+      <p class="note">Wi-Fi nhà luôn được giữ khi đang mở cấu hình (AP+STA), nên Matter và cảm biến vẫn hoạt động. Điện thoại nối vào Wi-Fi cấu hình không có nghĩa là ESP đã có đường mạng tới cảm biến: hãy kiểm tra trạng thái ở trên.</p>
+    </div>
+    <div class="card">
+      <h2>Kết nối mạng Wi-Fi</h2>
+      <div class="row">
+        <button id="wf-scan" class="btn" type="button">Quét mạng</button>
+        <span id="wf-scan-state" class="muted"></span>
+      </div>
+      <ul id="wf-list" class="list pick"></ul>
+      <form id="wf-form" class="form" autocomplete="off">
+        <label>Tên mạng (SSID)<input id="wf-in-ssid" name="ssid" maxlength="32" required></label>
+        <label>Mật khẩu<input id="wf-in-pass" name="password" type="password" maxlength="63"></label>
+        <label class="check"><input type="checkbox" id="wf-show"> Hiện mật khẩu</label>
+        <div class="row"><button class="btn primary" type="submit">Lưu</button></div>
+        <p class="note">ESP chỉ hỗ trợ Wi-Fi 2,4 GHz. Nếu mạng mới không kết nối được trong thời gian chờ, thiết bị tự quay lại mạng cũ.</p>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Wi-Fi cấu hình (SoftAP)</h2>
+      <dl class="kv">
+        <dt>Tên Wi-Fi cấu hình</dt><dd id="ap-ssid">-</dd>
+        <dt>Điện thoại đang kết nối</dt><dd id="ap-clients">-</dd>
+        <dt>Địa chỉ trang cấu hình</dt><dd class="mono">http://192.168.4.1</dd>
+      </dl>
+      <form id="ap-form" class="form" autocomplete="off">
+        <label>Mật khẩu mới<input name="password" type="password" minlength="8" maxlength="63" required autocomplete="new-password"></label>
+        <label>Nhập lại mật khẩu<input name="confirm" type="password" minlength="8" maxlength="63" required autocomplete="new-password"></label>
+        <div class="row"><button class="btn" type="submit">Lưu</button></div>
+        <p class="note">Mật khẩu mới có hiệu lực ở lần mở cấu hình sau. Quên mật khẩu: cắm USB, chạy <code>idf.py monitor</code> và gõ lệnh <code>secrets</code>.</p>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= Nhà thông minh -->
+<section id="page-home" class="page" hidden>
+  <div class="grid">
+    <div class="card">
+      <h2>Thêm thermostat vào ứng dụng nhà</h2>
+      <ol class="steps">
+        <li>ESP phải kết nối Wi-Fi nhà (trang Wi-Fi) và điện thoại dùng cùng mạng nhà.</li>
+        <li>Mở cửa sổ ghép bên dưới (thiết bị tự mở khi chưa thuộc hệ sinh thái nào).</li>
+        <li>Trong Apple Home, Aqara Home, SmartThings…: Thêm thiết bị Matter, quét mã QR hoặc nhập mã số.</li>
+        <li>Ứng dụng sẽ báo “thiết bị chưa được chứng nhận” vì firmware dùng chứng thư thử nghiệm của SDK: chọn vẫn thêm.</li>
+      </ol>
+      <dl class="kv">
+        <dt>Cửa sổ ghép</dt><dd id="hm-window">-</dd>
+        <dt>Số hệ sinh thái đã ghép</dt><dd id="hm-count">-</dd>
+      </dl>
+      <div class="row">
+        <select id="hm-minutes" aria-label="Thời gian mở"></select>
+        <button id="hm-open" class="btn primary" type="button">Mở cửa sổ ghép</button>
+        <button id="hm-close" class="btn" type="button">Đóng</button>
+      </div>
+      <div class="row"><button id="hm-show" class="btn" type="button">Hiện mã ghép</button></div>
+      <div id="hm-code" hidden>
+        <div id="hm-qr" class="qr"></div>
+        <dl class="kv">
+          <dt>Mã số</dt><dd id="hm-manual" class="mono big2">-</dd>
+          <dt>Nội dung QR</dt><dd id="hm-qrtext" class="mono small">-</dd>
+        </dl>
+        <p class="note">Mã này dùng để ghép thiết bị: không chia sẻ cho người khác.</p>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Hệ sinh thái đã ghép (Fabric A)</h2>
+      <ul id="hm-fabrics" class="list"></ul>
+      <p class="note">Danh sách không gồm fabric riêng mà ESP dùng để đọc cảm biến. Muốn gỡ thermostat khỏi một hệ sinh thái, hãy xóa thiết bị trong ứng dụng đó. Thermostat chỉ hỗ trợ Tắt/Làm lạnh (và Sưởi/Khô/Quạt nếu profile đã học), không báo trạng thái máy nén vì IR là điều khiển một chiều.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= Cảm biến Matter -->
+<section id="page-sensor" class="page" hidden>
+  <div class="grid">
+    <div class="card">
+      <h2>Cảm biến đang dùng</h2>
+      <p id="sn-none" class="muted">Chưa có cảm biến Matter nào.</p>
+      <div id="sn-info" hidden>
+        <dl class="kv">
+          <dt>Tên</dt><dd id="sn-name">-</dd>
+          <dt>Node / endpoint</dt><dd id="sn-node" class="mono small">-</dd>
+          <dt>Trạng thái</dt><dd id="sn-state">-</dd>
+          <dt>Nhiệt độ</dt><dd id="sn-value">-</dd>
+          <dt>Giá trị nhận lúc</dt><dd id="sn-vage">-</dd>
+          <dt>Báo cáo/keep-alive cuối</dt><dd id="sn-aage">-</dd>
+          <dt>Chu kỳ báo cáo</dt><dd id="sn-interval">-</dd>
+          <dt>Coi là mất sau</dt><dd id="sn-stale">-</dd>
+          <dt>Số lần thử lại</dt><dd id="sn-retry">-</dd>
+        </dl>
+        <div id="sn-error" class="err" hidden></div>
+        <div class="row">
+          <button id="sn-retry-btn" class="btn" type="button">Thử kết nối lại</button>
+          <button id="sn-read-btn" class="btn" type="button">Đọc thử</button>
+          <button id="sn-remove-btn" class="btn danger" type="button">Gỡ cảm biến</button>
+        </div>
+        <details>
+          <summary>Cảm biến hỏng hoặc không còn trong mạng?</summary>
+          <p class="note">“Gỡ cảm biến” gửi RemoveFabric tới cảm biến: chỉ xóa fabric của ESP, không reset cảm biến và không ảnh hưởng hub cũ. Nếu cảm biến không còn phản hồi, chỉ xóa liên kết trên ESP; khi đó hãy xóa kết nối “hệ sinh thái khác” trong ứng dụng gốc của cảm biến.</p>
+          <button id="sn-forget-btn" class="btn danger" type="button">Chỉ xóa liên kết trên ESP</button>
+        </details>
+      </div>
+      <dl class="kv">
+        <dt>Cảm biến cục bộ (dây I²C)</dt><dd id="sn-local">-</dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h2>Thêm cảm biến Matter</h2>
+      <ol class="steps">
+        <li>Cảm biến đã được thêm vào hệ sinh thái nhà (Apple Home, Aqara Home, SmartThings…).</li>
+        <li>Trong ứng dụng đó, chọn cảm biến → chia sẻ / ghép với hệ sinh thái khác (Multi-Admin) để lấy mã chia sẻ.</li>
+        <li>Nhập mã dưới đây khi mã còn hiệu lực. ESP ghép cảm biến vào fabric riêng của nó qua mạng (on-network); liên kết với hub cũ giữ nguyên.</li>
+        <li>Chọn endpoint nhiệt độ rồi bấm Lưu. ESP subscribe và tự kết nối lại sau mất điện/mất Wi-Fi.</li>
+      </ol>
+      <form id="pair-form" class="form" autocomplete="off">
+        <label>Mã chia sẻ<input id="pair-code" name="code" maxlength="40" required placeholder="1234-567-8901 hoặc MT:…" spellcheck="false"></label>
+        <label class="check"><input type="checkbox" id="pair-unc"> Cho phép thiết bị chưa được chứng nhận (chứng thư thử nghiệm, DIY)</label>
+        <div class="row">
+          <button class="btn primary" type="submit">Bắt đầu ghép</button>
+          <button id="pair-cancel" class="btn" type="button">Hủy</button>
+        </div>
+      </form>
+      <p class="note">Cảm biến Thread: cần một Thread Border Router (ví dụ HomePod mini/Apple TV 4K hoặc hub có chức năng Border Router) trong cùng mạng LAN; ESP liên lạc qua Wi-Fi và IPv6, không cần radio Thread. Nếu Border Router duy nhất là hub và hub tắt, ESP sẽ mất đường tới cảm biến Thread.</p>
+    </div>
+    <div class="card" id="pg-card" hidden>
+      <h2>Tiến trình ghép / đọc</h2>
+      <dl class="kv">
+        <dt>Trạng thái</dt><dd id="pg-state">-</dd>
+        <dt>Bước SDK</dt><dd id="pg-stage" class="mono small">-</dd>
+        <dt>Thiết bị</dt><dd id="pg-device">-</dd>
+      </dl>
+      <div id="pg-error" class="err" hidden></div>
+      <div id="pg-att" class="warn" hidden></div>
+      <div id="pg-endpoints"></div>
+      <div class="row">
+        <button id="pg-bind" class="btn primary" type="button" hidden>Lưu</button>
+        <button id="pg-remove" class="btn danger" type="button" hidden>Gỡ thiết bị vừa ghép</button>
+      </div>
+    </div>
+    <div class="card" id="sim-card" hidden>
+      <h2>Giả lập (chỉ chế độ thử nghiệm)</h2>
+      <form id="sim-form" class="form">
+        <label>Nhiệt độ giả lập (°C)<input name="temp" type="number" step="0.1" min="-40" max="80" value="26"></label>
+        <div class="row">
+          <button class="btn" type="submit">Bật giả lập</button>
+          <button id="sim-off" class="btn" type="button">Tắt giả lập</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= Máy lạnh -->
+<section id="page-ac" class="page" hidden>
+  <div id="ac-restart" class="warn" hidden>
+    Giới hạn nhiệt độ/chế độ của profile đang dùng khác với thermostat Matter hiện tại.
+    <button id="ac-restart-btn" class="btn small" type="button">Khởi động lại để áp dụng</button>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <h2>Profile máy lạnh</h2>
+      <div id="ac-ready"></div>
+      <div class="tblwrap">
+        <table class="tbl">
+          <thead><tr><th>Ô</th><th>Tên</th><th>Lệnh</th><th>Trạng thái</th></tr></thead>
+          <tbody id="ac-profiles"></tbody>
+        </table>
+      </div>
+      <form id="ac-create" class="form" hidden>
+        <h3>Tạo profile mới</h3>
+        <label>Ô lưu<select name="slot" id="ac-create-slot"></select></label>
+        <label>Tên<input name="name" maxlength="31" required placeholder="VD: Máy lạnh phòng ngủ"></label>
+        <label>Bước nhiệt độ của remote<select name="step"><option value="2">1 °C</option><option value="1">0,5 °C</option></select></label>
+        <label>Sóng mang (Hz, 0 = mặc định)<input name="carrier" type="number" min="0" max="60000" value="0"></label>
+        <div class="row"><button class="btn primary" type="submit">Lưu</button></div>
+      </form>
+      <p class="note">Firmware chỉ phát lại lệnh đã học từ remote gốc (raw IR), không tự tạo mã cho hãng máy lạnh. Sóng mang mặc định 38 kHz; đầu thu IR thông thường đã giải điều chế nên không đo được sóng mang gốc.</p>
+    </div>
+
+    <div class="card" id="ace-card" hidden>
+      <h2>Profile: <span id="ace-title"></span></h2>
+      <div id="ace-lockinfo"></div>
+      <form id="ace-form" class="form">
+        <label>Tên<input name="name" maxlength="31" required></label>
+        <label>Bước nhiệt độ<select name="step"><option value="2">1 °C</option><option value="1">0,5 °C</option></select></label>
+        <label>Quạt mặc định<select name="fan" class="sel-fan"></select></label>
+        <label>Đảo gió mặc định<select name="swing" class="sel-swing"></select></label>
+        <label>Sóng mang (Hz, 0 = mặc định)<input name="carrier" type="number" min="0" max="60000"></label>
+        <div class="row"><button class="btn" type="submit">Lưu</button></div>
+      </form>
+      <div class="row">
+        <button id="ace-select" class="btn" type="button">Dùng profile này</button>
+        <button id="ace-lock" class="btn primary" type="button">Khóa profile</button>
+        <button id="ace-delete" class="btn danger" type="button">Xóa profile</button>
+      </div>
+      <h3>Lệnh đã học (<span id="ace-count">0</span>)</h3>
+      <ul id="ace-codes" class="list codes"></ul>
+      <p class="note">Sau khi phát thử, trạng thái thật của máy lạnh có thể khác trạng thái thermostat: bấm “Gửi lại trạng thái hiện tại” ở phần Điều khiển.</p>
+    </div>
+
+    <div class="card" id="learn-card" hidden>
+      <h2>Học lệnh IR</h2>
+      <ol class="steps">
+        <li>Chọn trạng thái muốn học (học lệnh Tắt và các trạng thái sẽ dùng).</li>
+        <li>Chỉnh remote tới đúng trạng thái đó: remote máy lạnh gửi toàn bộ trạng thái (chế độ, nhiệt độ, quạt, đảo gió) mỗi lần bấm.</li>
+        <li>Bấm “Bắt đầu học”, hướng remote vào đầu thu (5–30 cm) và bấm một nút sao cho trạng thái cuối cùng trên remote đúng như đã chọn.</li>
+        <li>Phát thử; nếu máy lạnh phản hồi đúng thì bấm Lưu.</li>
+      </ol>
+      <form id="learn-form" class="form">
+        <label>Nguồn<select name="power" id="lf-power"><option value="1">Bật</option><option value="0">Tắt (OFF)</option></select></label>
+        <label class="lf-on">Chế độ<select name="mode" id="lf-mode"></select></label>
+        <label class="lf-on lf-temp">Nhiệt độ<select name="temp_half" id="lf-temp"></select></label>
+        <label class="lf-on">Quạt<select name="fan" id="lf-fan" class="sel-fan"></select></label>
+        <label class="lf-on">Đảo gió<select name="swing" id="lf-swing" class="sel-swing"></select></label>
+      </form>
+      <div class="row">
+        <button id="learn-start" class="btn primary" type="button">Bắt đầu học</button>
+        <button id="learn-cancel" class="btn" type="button">Hủy</button>
+      </div>
+      <div id="learn-status" class="info" hidden></div>
+      <div class="row" id="learn-result" hidden>
+        <button id="learn-test" class="btn" type="button">Phát thử</button>
+        <button id="learn-save" class="btn primary" type="button">Lưu</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Điều khiển</h2>
+      <form id="ctl-form" class="form">
+        <label>Chế độ<select name="mode" id="ctl-mode"></select></label>
+        <label id="ctl-sp-wrap">Nhiệt độ đặt<select name="sp" id="ctl-sp"></select></label>
+        <label>Quạt<select name="fan" id="ctl-fan"></select></label>
+        <label>Đảo gió<select name="swing" id="ctl-swing"></select></label>
+        <div class="row">
+          <button class="btn primary" type="submit">Gửi</button>
+          <button id="ctl-resend" class="btn" type="button">Gửi lại trạng thái hiện tại</button>
+        </div>
+      </form>
+      <dl class="kv">
+        <dt>Đã phát IR</dt><dd id="ctl-last">-</dd>
+        <dt>Đang chờ phát</dt><dd id="ctl-pending">-</dd>
+      </dl>
+      <div id="ctl-error" class="err" hidden></div>
+      <p class="note">Lệnh đi qua thermostat Matter nên ứng dụng nhà cũng thấy thay đổi. Chỉ phát được tổ hợp đã học; nếu chưa học đúng nhiệt độ, thiết bị dùng nhiệt độ đã học gần nhất cùng chế độ (không bao giờ đổi sang chế độ khác).</p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= Thuật toán -->
+<section id="page-algo" class="page" hidden>
+  <div class="grid">
+    <div class="card">
+      <h2>Cách điều khiển</h2>
+      <form id="algo-form" class="form">
+        <label class="radio"><input type="radio" name="control_mode" value="0"> <span><b>Direct</b>: gửi đúng nhiệt độ đặt của bạn (làm tròn theo bước của máy lạnh).</span></label>
+        <label class="radio"><input type="radio" name="control_mode" value="1"> <span><b>Theo cảm biến ngoài</b>: chỉnh setpoint gửi qua IR để nhiệt độ đo bởi cảm biến tiến tới nhiệt độ đặt.</span></label>
+        <label>Vùng chết / trễ (°C)<input name="deadband" type="number" step="0.05" min="0.1" max="3" required></label>
+        <label>Giới hạn bù tối đa (°C)<input name="max_offset" type="number" step="0.5" min="0" max="5" required></label>
+        <label>Khoảng cách tối thiểu giữa hai lần bù (phút)<input name="comp_interval" type="number" step="1" min="2" max="120" required></label>
+        <label>Hằng số lọc nhiễu (phút, 0 = không lọc)<input name="filter_tau" type="number" step="0.5" min="0" max="30" required></label>
+        <label>Gộp thay đổi liên tiếp từ ứng dụng (giây)<input name="debounce" type="number" step="0.1" min="0.2" max="10" required></label>
+        <label>Ngưỡng dữ liệu cũ tối thiểu (phút)<input name="stale_min" type="number" step="1" min="5" max="1440" required></label>
+        <label class="check"><input type="checkbox" name="allow_local_fallback"> Dùng cảm biến cục bộ (dây) khi cảm biến Matter không khả dụng</label>
+        <label class="check"><input type="checkbox" name="resend_on_boot"> Gửi lại trạng thái cuối sau khi mất điện</label>
+        <div class="row"><button class="btn primary" type="submit">Lưu</button></div>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Trạng thái thuật toán</h2>
+      <dl class="kv">
+        <dt>Nhiệt độ sau lọc</dt><dd id="al-filtered">-</dd>
+        <dt>Nhiệt độ đặt</dt><dd id="al-target">-</dd>
+        <dt>Độ bù hiện tại</dt><dd id="al-offset">-</dd>
+        <dt>Setpoint gửi qua IR</dt><dd id="al-irsp">-</dd>
+        <dt>Lý do</dt><dd id="al-reason">-</dd>
+      </dl>
+      <h3>Nguyên tắc</h3>
+      <ul class="plain">
+        <li>Máy lạnh vẫn tự điều khiển theo cảm biến bên trong của nó; thiết bị chỉ dịch setpoint gửi qua IR, không giả lập Follow-Me/I-Feel.</li>
+        <li>Không bù khi chênh lệch nằm trong vùng chết; mỗi lần bù chỉ một bước, cách nhau ít nhất một chu kỳ; độ bù không vượt giới hạn và không vượt giới hạn đã học của máy lạnh.</li>
+        <li>Khi nhiệt độ ngoài không hợp lệ hoặc quá cũ: dừng bù và gửi đúng nhiệt độ đặt.</li>
+        <li>Lệnh Tắt của bạn luôn ưu tiên; thuật toán không bao giờ tự bật máy lạnh.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= Chẩn đoán -->
+<section id="page-diag" class="page" hidden>
+  <div class="grid">
+    <div class="card"><h2>Firmware</h2><dl class="kv" id="dg-fw"></dl></div>
+    <div class="card"><h2>Phần cứng và bộ nhớ</h2><dl class="kv" id="dg-mem"></dl></div>
+    <div class="card"><h2>Matter</h2><dl class="kv" id="dg-matter"></dl></div>
+    <div class="card"><h2>Hồng ngoại</h2><dl class="kv" id="dg-ir"></dl></div>
+    <div class="card">
+      <h2>Lỗi gần nhất</h2>
+      <ul id="dg-errors" class="list"></ul>
+    </div>
+    <div class="card">
+      <h2>Hệ thống</h2>
+      <p class="note">Khởi động lại không xóa cấu hình, fabric, cảm biến hay profile IR. Firmware không có chức năng factory reset qua nút bấm.</p>
+      <div class="row"><button id="dg-reboot" class="btn danger" type="button">Khởi động lại</button></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<div id="toast" class="toast" role="status" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>

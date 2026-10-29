@@ -8,6 +8,7 @@
 #include "driver/rmt_rx.h"
 #include "driver/rmt_tx.h"
 #include "esp_attr.h"
+#include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_rom_crc.h"
@@ -106,7 +107,7 @@ typedef struct {
     bool force;
     uint8_t repeats;
     uint32_t crc;
-    char label[48];
+    char label[64];
 } tx_request_t;
 
 static SemaphoreHandle_t s_lock;
@@ -394,9 +395,11 @@ static esp_err_t transmit_blob(const uint8_t *blob, size_t len, uint8_t repeats)
         syms[i].duration1 = tmp[i].duration1;
         syms[i].level1 = tmp[i].level1;
     }
-    uint16_t carrier = code.carrier_hz ? code.carrier_hz : s_carrier_hz;
-    /* the configured carrier always wins: learned codes record what was configured, not measured */
-    carrier = s_carrier_hz;
+    /* The carrier of the active profile (or Kconfig) always wins: the carrier stored in a learned
+     * code is only what was configured while learning - a demodulating receiver cannot measure it. */
+    lock();
+    uint16_t carrier = s_carrier_hz;
+    unlock();
     err = apply_carrier(carrier);
     if (err != ESP_OK) {
         goto out;

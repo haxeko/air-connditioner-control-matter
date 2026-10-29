@@ -94,6 +94,10 @@ esp_err_t matter_commissioner_refresh(uint64_t node_id);
  */
 esp_err_t matter_commissioner_remove_node(uint64_t node_id);
 
+/** Result of matter_commissioner_remove_node(), called on the CHIP thread (must not block). */
+typedef void (*commissioner_removed_cb_t)(uint64_t node_id, bool ok);
+void matter_commissioner_set_removed_cb(commissioner_removed_cb_t cb);
+
 /** Validate an onboarding payload without starting anything (no CHIP thread needed). */
 bool matter_commissioner_validate_code(const char *setup_code);
 
