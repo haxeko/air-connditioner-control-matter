@@ -34,6 +34,10 @@ constexpr uint32_t kWaitCommissionerMs = 5000;
 
 SemaphoreHandle_t gLock;
 StaticSemaphore_t gLockBuf;
+/* Serialises Publish() (CHIP thread, local sensor task, API callers) so that the sink sees the
+ * transitions in order; the sink only queues work and never blocks. */
+SemaphoreHandle_t gPubLock;
+StaticSemaphore_t gPubLockBuf;
 rt_status_t gStatus;
 app_config_t gCfg;
 rt_sink_cb_t gSink;
@@ -68,6 +72,7 @@ void SetState(rt_state_t st, const char * err)
 /* Choose the effective source and notify the sink on transitions or new samples. */
 void Publish(bool newSample)
 {
+    xSemaphoreTake(gPubLock, portMAX_DELAY);
     bool valid = false;
     int16_t centi = 0;
     temp_source_t src = TEMP_SRC_NONE;
@@ -103,16 +108,16 @@ void Publish(bool newSample)
         gStatus.effective_centi = valid ? centi : 0;
     }
     bool changed = !gPubOnce || valid != gPubValid || src != gPubSource || (valid && centi != gPubCenti);
-    if (!changed && !(newSample && valid)) {
-        return;
+    if (changed || (newSample && valid)) {
+        gPubOnce = true;
+        gPubValid = valid;
+        gPubCenti = centi;
+        gPubSource = src;
+        if (gSink) {
+            gSink(valid, centi, src);
+        }
     }
-    gPubOnce = true;
-    gPubValid = valid;
-    gPubCenti = centi;
-    gPubSource = src;
-    if (gSink) {
-        gSink(valid, centi, src);
-    }
+    xSemaphoreGive(gPubLock);
 }
 
 esp_err_t SaveBinding(const sensor_binding_t & b)
@@ -474,6 +479,7 @@ void OnLocalSample(bool valid, int16_t centi)
 extern "C" esp_err_t remote_temperature_init(const app_config_t * cfg, rt_sink_cb_t sink)
 {
     gLock = xSemaphoreCreateMutexStatic(&gLockBuf);
+    gPubLock = xSemaphoreCreateMutexStatic(&gPubLockBuf);
     gCfg = *cfg;
     gSink = sink;
     memset(&gStatus, 0, sizeof(gStatus));

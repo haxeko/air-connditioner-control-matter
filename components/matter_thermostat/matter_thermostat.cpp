@@ -1,5 +1,6 @@
 #include "matter_thermostat.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 #include <esp_matter.h>
@@ -45,6 +46,7 @@ thermostat_user_state_t sUser;
 bool sStarted;
 SemaphoreHandle_t sInitDone;
 StaticSemaphore_t sInitDoneBuf;
+bool sRestoring; /* boot-time clamping: attribute updates are not user changes */
 
 struct Guard
 {
@@ -156,7 +158,7 @@ esp_err_t AttributeCallback(attribute::callback_type_t type, uint16_t endpoint_i
             mask = TSTAT_CHANGED_HEAT_SP;
         }
     }
-    if (mask) {
+    if (mask && !sRestoring) {
         NotifyUser(mask);
     }
     return ESP_OK;
@@ -194,6 +196,21 @@ void AppEventCallback(const ChipDeviceEvent * event, intptr_t arg)
     }
 }
 
+int16_t Clamp(int16_t v, int16_t lo, int16_t hi)
+{
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+/* Setpoint limits follow the active AC profile. The esp-matter helpers create Min/Max*SetpointLimit
+ * as NONVOLATILE, which would restore the limits of a previous profile from NVS at the next boot:
+ * they are created here without that flag so the profile is always authoritative. */
+void CreateLimit(cluster_t * cluster, uint32_t id, int16_t value, uint16_t flags)
+{
+    if (esp_matter::attribute::create(cluster, id, flags, esp_matter_int16(value)) == nullptr) {
+        ESP_LOGE(TAG, "could not create limit attribute 0x%04" PRIX32, id);
+    }
+}
+
 esp_err_t ReadInt16(uint32_t attributeId, int16_t & out)
 {
     esp_matter_attr_val_t val;
@@ -228,17 +245,26 @@ void InitAfterServer(intptr_t)
     }
 
     /* A profile change may have narrowed the limits or removed a mode: bring the stored state back
-     * into range so the hub never shows a value the AC cannot execute. */
+     * into range so the hub never shows a value the AC cannot execute. These corrections are not
+     * user changes (no IR is sent for them); the final state is reported once with the BOOT flag. */
+    sRestoring = true;
     if (!ModeAllowed(sUser.system_mode)) {
         esp_matter_attr_val_t off = esp_matter_enum8(TSTAT_MODE_OFF);
         attribute::update(sEndpointId, Thermostat::Id, Thermostat::Attributes::SystemMode::Id, &off);
     }
-    int16_t clamped = sUser.cool_setpoint < sCaps.cool_min ? sCaps.cool_min
-        : (sUser.cool_setpoint > sCaps.cool_max ? sCaps.cool_max : sUser.cool_setpoint);
+    int16_t clamped = Clamp(sUser.cool_setpoint, sCaps.cool_min, sCaps.cool_max);
     if (clamped != sUser.cool_setpoint) {
         esp_matter_attr_val_t v = esp_matter_int16(clamped);
         attribute::update(sEndpointId, Thermostat::Id, Thermostat::Attributes::OccupiedCoolingSetpoint::Id, &v);
     }
+    if (sCaps.heat) {
+        clamped = Clamp(sUser.heat_setpoint, sCaps.heat_min, sCaps.heat_max);
+        if (clamped != sUser.heat_setpoint) {
+            esp_matter_attr_val_t v = esp_matter_int16(clamped);
+            attribute::update(sEndpointId, Thermostat::Id, Thermostat::Attributes::OccupiedHeatingSetpoint::Id, &v);
+        }
+    }
+    sRestoring = false;
 
     OpenWindowIfUncommissioned();
     sStarted = true;
@@ -354,15 +380,16 @@ extern "C" esp_err_t matter_thermostat_create(const thermostat_caps_t * caps, th
         return ESP_FAIL;
     }
     /* Setpoint limits = what the AC profile can execute. */
-    cluster::thermostat::attribute::create_abs_min_cool_setpoint_limit(tstat, caps->cool_min);
-    cluster::thermostat::attribute::create_abs_max_cool_setpoint_limit(tstat, caps->cool_max);
-    cluster::thermostat::attribute::create_min_cool_setpoint_limit(tstat, caps->cool_min);
-    cluster::thermostat::attribute::create_max_cool_setpoint_limit(tstat, caps->cool_max);
+    using namespace Thermostat::Attributes;
+    CreateLimit(tstat, AbsMinCoolSetpointLimit::Id, caps->cool_min, ATTRIBUTE_FLAG_NONE);
+    CreateLimit(tstat, AbsMaxCoolSetpointLimit::Id, caps->cool_max, ATTRIBUTE_FLAG_NONE);
+    CreateLimit(tstat, MinCoolSetpointLimit::Id, caps->cool_min, ATTRIBUTE_FLAG_WRITABLE);
+    CreateLimit(tstat, MaxCoolSetpointLimit::Id, caps->cool_max, ATTRIBUTE_FLAG_WRITABLE);
     if (caps->heat) {
-        cluster::thermostat::attribute::create_abs_min_heat_setpoint_limit(tstat, caps->heat_min);
-        cluster::thermostat::attribute::create_abs_max_heat_setpoint_limit(tstat, caps->heat_max);
-        cluster::thermostat::attribute::create_min_heat_setpoint_limit(tstat, caps->heat_min);
-        cluster::thermostat::attribute::create_max_heat_setpoint_limit(tstat, caps->heat_max);
+        CreateLimit(tstat, AbsMinHeatSetpointLimit::Id, caps->heat_min, ATTRIBUTE_FLAG_NONE);
+        CreateLimit(tstat, AbsMaxHeatSetpointLimit::Id, caps->heat_max, ATTRIBUTE_FLAG_NONE);
+        CreateLimit(tstat, MinHeatSetpointLimit::Id, caps->heat_min, ATTRIBUTE_FLAG_WRITABLE);
+        CreateLimit(tstat, MaxHeatSetpointLimit::Id, caps->heat_max, ATTRIBUTE_FLAG_WRITABLE);
     }
 
     {

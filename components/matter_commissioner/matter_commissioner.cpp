@@ -82,6 +82,7 @@ commissioner_progress_t gProgress;
 commissioner_info_t gInfo;
 bool gReady = false;
 NodeId gPairingNodeId = kUndefinedNodeId;
+NodeId gMatchingNodeId = kUndefinedNodeId; /* sensor already carries Fabric B (paired before) */
 
 /* ------------------------------------------------------------------------------------------ */
 
@@ -411,16 +412,30 @@ public:
 
     void OnFabricCheck(NodeId matchingNodeId) override
     {
-        if (matchingNodeId != kUndefinedNodeId) {
+        if (matchingNodeId == kUndefinedNodeId) {
+            return;
+        }
+        /* The sensor already has a NOC of Fabric B (e.g. the binding was only forgotten on this
+         * device). A second AddNOC would fail with FabricConflict: stop right after reading the
+         * commissioning info (before the fail-safe is armed) and reuse the existing node. */
+        ESP_LOGI(TAG, "sensor already on fabric B as node 0x%016llX, reusing it", (unsigned long long)matchingNodeId);
+        gMatchingNodeId = matchingNodeId;
+        {
             Locked l;
             gProgress.already_on_fabric = true;
             gProgress.node_id = matchingNodeId;
         }
+        gAutoCommissioner.StopCommissioning();
     }
 
     void OnCommissioningComplete(NodeId deviceId, CHIP_ERROR error) override
     {
         gPairingNodeId = kUndefinedNodeId;
+        if (gMatchingNodeId != kUndefinedNodeId) {
+            deviceId = gMatchingNodeId; /* stopped on purpose, see OnFabricCheck() */
+            gMatchingNodeId = kUndefinedNodeId;
+            error = CHIP_NO_ERROR;
+        }
         if (error != CHIP_NO_ERROR) {
             if (error == CHIP_ERROR_FAILED_DEVICE_ATTESTATION) {
                 SetError(COMMISSIONER_FAILED,
@@ -672,6 +687,7 @@ void DoStartPairing(intptr_t arg)
         FinishBusy();
         goto exit;
     }
+    gMatchingNodeId = kUndefinedNodeId;
     err = gIssuer.AllocateDeviceNodeId(nodeId);
     if (err != CHIP_NO_ERROR) {
         SetError(COMMISSIONER_FAILED, "Không cấp được Node ID", err);

@@ -1,5 +1,6 @@
 #include "wifi_config.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "app_state.h"
@@ -398,9 +399,11 @@ esp_err_t wifi_config_set_sta(const char *ssid, const char *password)
     if (s_job == WIFI_JOB_CONNECTING) {
         return ESP_ERR_INVALID_STATE;
     }
+    /* Keep the working credentials for the rollback, also when only the password changes. */
     wifi_config_t cur;
     if (esp_wifi_get_config(WIFI_IF_STA, &cur) == ESP_OK && cur.sta.ssid[0] != 0 &&
-        strncmp((const char *)cur.sta.ssid, ssid, sizeof(cur.sta.ssid)) != 0) {
+        (strncmp((const char *)cur.sta.ssid, ssid, sizeof(cur.sta.ssid)) != 0 ||
+         strncmp((const char *)cur.sta.password, password ? password : "", sizeof(cur.sta.password)) != 0)) {
         wifi_creds_t prev;
         memset(&prev, 0, sizeof(prev));
         strlcpy(prev.ssid, (const char *)cur.sta.ssid, sizeof(prev.ssid));

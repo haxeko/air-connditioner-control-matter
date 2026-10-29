@@ -14,7 +14,7 @@
   const SWINGS = ['Tắt', 'Bật'];
   const PAIR_STATES = [
     'Không có thao tác',
-    'Đang tìm cảm biến trên mạng (DNS-SD)',
+    'Đang tìm cảm biến trên mạng (DNS-SD) và thiết lập phiên PASE',
     'Đang thiết lập phiên bảo mật (PASE)',
     'Đang ghép: xác thực thiết bị, cấp chứng thư, ACL, CASE',
     'Đang đọc thông tin và endpoint nhiệt độ',
@@ -426,7 +426,10 @@
     const dev = [p.vendor_name, p.product_name, p.node_label].filter(Boolean).join(' · ');
     text('pg-device', dev ? dev + ' (VID ' + hex(p.vendor_id) + ', PID ' + hex(p.product_id) + ')' : '-');
     msgbox('pg-error', p.state === 6 ? p.error : '');
-    msgbox('pg-att', p.attestation_overridden ? 'Đã chấp nhận thiết bị chưa được chứng nhận: ' + p.attestation_note : '');
+    msgbox('pg-att', [
+      p.attestation_overridden ? 'Đã chấp nhận thiết bị chưa được chứng nhận: ' + p.attestation_note : '',
+      p.already_on_fabric ? 'Cảm biến đã có fabric của ESP từ lần ghép trước: dùng lại Node ID cũ, không cấp chứng thư mới.' : '',
+    ].filter(Boolean).join(' '));
     renderEndpoints(p, s);
     fast = active || j.commissioner.busy;
   };
