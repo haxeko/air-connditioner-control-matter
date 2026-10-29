@@ -42,9 +42,9 @@ typedef struct {
 typedef struct {
     commissioner_state_t state;
     char stage[48];               /* last CHIP commissioning stage (English, from the SDK)       */
-    char error[96];               /* human readable error (no secrets)                           */
+    char error[128];              /* human readable error (no secrets)                           */
     bool attestation_overridden;  /* user allowed an uncertified/test device                     */
-    char attestation_note[64];
+    char attestation_note[96];
     uint64_t node_id;             /* node ID of the device in Fabric B                           */
     bool already_on_fabric;       /* device was already commissioned into Fabric B               */
     uint16_t vendor_id, product_id;
@@ -64,6 +64,13 @@ typedef struct {
     uint16_t paa_count;
     uint16_t listen_port;
 } commissioner_info_t;
+
+/**
+ * Load (or, on the first boot, create and persist) the Fabric B root key, RCAC, IPK and IDs and the
+ * offline PAA store. Call from the main task BEFORE esp_matter::start(): the first-boot key
+ * generation and NVS writes must not run on the CHIP thread.
+ */
+esp_err_t matter_commissioner_prepare(void);
 
 /**
  * Must run on the CHIP thread immediately after esp_matter::start() (before any controller can

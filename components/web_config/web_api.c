@@ -705,7 +705,9 @@ static void post_sensor_pair(api_ctx_t *c)
 static void post_sensor_cancel(api_ctx_t *c)
 {
     esp_err_t err = matter_commissioner_cancel();
-    if (err != ESP_OK) {
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        api_fail(c, 409, "Đang gỡ fabric khỏi cảm biến: không thể hủy giữa chừng, hãy chờ kết quả");
+    } else if (err != ESP_OK) {
         api_fail(c, 409, "Không có thao tác để hủy");
     }
 }

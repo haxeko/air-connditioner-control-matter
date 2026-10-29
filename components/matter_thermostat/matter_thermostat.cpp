@@ -411,6 +411,9 @@ extern "C" esp_err_t matter_thermostat_start(void)
         return err;
     }
     esp_matter::set_custom_commissionable_data_provider(&identity);
+    if (matter_commissioner_prepare() != ESP_OK) {
+        ESP_LOGE(TAG, "Fabric B identity unavailable; the thermostat keeps working without sensor pairing");
+    }
     err = esp_matter::set_server_init_params(&sServerParams);
     if (err != ESP_OK) {
         return err;

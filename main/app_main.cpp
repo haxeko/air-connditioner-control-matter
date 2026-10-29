@@ -108,7 +108,16 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(climate_control_start(&cfg));
 
     ESP_ERROR_CHECK(matter_thermostat_create(&caps, on_thermostat_change));
-    ESP_ERROR_CHECK(matter_thermostat_start());
+    err = matter_thermostat_start();
+    if (err == ESP_ERR_TIMEOUT)
+    {
+        /* keep the portal, IR and console available for diagnosis instead of a reboot loop */
+        app_log_error("app", "Matter post-start initialisation is late");
+    }
+    else
+    {
+        ESP_ERROR_CHECK(err);
+    }
 
     ESP_ERROR_CHECK(remote_temperature_init(&cfg, on_temperature));
     non_fatal("remote temperature", remote_temperature_start());

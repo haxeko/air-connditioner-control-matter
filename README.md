@@ -154,12 +154,20 @@ Theo đúng mô hình “combined server/commissioner” của connectedhomeip
    `sdkconfig.defaults`: `CONFIG_ENABLE_PERSIST_SUBSCRIPTIONS=n`. Mã có `static_assert`/`#error` để không thể
    build sai cấu hình này.
 4. Fabric B: khóa gốc P-256, RCAC (không ICAC), IPK, Fabric ID và Node ID controller ngẫu nhiên, lưu ở NVS
-   namespace `ac_fabb`. Lần khởi động sau tìm lại đúng fabric (`FindFabric(rootPubKey, fabricId)`) và dùng lại
-   `fabricIndex` – **không tạo fabric mới sau mỗi lần reboot**. Fabric B có nhãn “ESP AC sensor link” và
-   không được tính là “hệ sinh thái nhà” (cửa sổ ghép thermostat tự mở khi chưa có fabric nhà nào).
+   namespace `ac_fabb`. Khóa và chứng thư được tạo/đọc **trước** `esp_matter::start()` trên tác vụ main
+   (`matter_commissioner_prepare()`), nên lần khởi động đầu không ghi flash trên CHIP thread. Lần khởi động
+   sau tìm lại đúng fabric (`FindFabric(rootPubKey, fabricId)`) và dùng lại `fabricIndex` – **không tạo
+   fabric mới sau mỗi lần reboot**. Fabric B có nhãn “ESP AC sensor link” và không được tính là “hệ sinh thái
+   nhà” (cửa sổ ghép thermostat tự mở khi chưa có fabric nhà nào).
 5. Commissioning cảm biến: `PairDevice(..., DiscoveryType::kDiscoveryNetworkOnly)` (chỉ on-network,
    BLE tắt), xác thực thiết bị bằng **75 PAA production** nhúng sẵn (bản sao DCL trong connectedhomeip,
-   nguồn và SHA-256 ở `components/matter_commissioner/paa/README.md`) – không cần Internet.
+   nguồn và SHA-256 ở `components/matter_commissioner/paa/README.md`) – không cần Internet. Thiết bị không
+   có đồng hồ thời gian thực tin cậy (không SNTP/Internet theo thiết kế), nên giống bản build ESP32 của
+   connectedhomeip (`src/credentials/BUILD.gn`) và các bản controller của esp_matter, kiểm tra “DAC còn hiệu
+   lực tại thời điểm hiện tại” được tắt (`CURRENT_TIME_NOT_IMPLEMENTED`, đặt trong `CMakeLists.txt` gốc);
+   chữ ký chuỗi chứng thư, chữ ký attestation, nonce và Certification Declaration vẫn được kiểm tra.
+   Tùy chọn *Cho phép thiết bị chưa được chứng nhận* chỉ chấp nhận lỗi “không có gốc tin cậy” (PAA/CD
+   không có trong kho, chứng thư thử nghiệm); chữ ký sai, thu hồi, sai nonce hay sai VID/PID vẫn bị từ chối.
 
 Mốc 1 (build khung server + commissioner) là commit `bd72683`; log khởi động sẽ in
 `commissioner ready: fabric index …, fabric 0x…, node 0x… (created|restored)`.
@@ -402,8 +410,11 @@ học IR hoặc thử Wi-Fi mới).
 
 ## 8. Bảo mật
 
-- Trang quản trị chỉ phục vụ kết nối tới **địa chỉ SoftAP** (kiểm tra địa chỉ cục bộ của socket, kể cả IPv4
-  map IPv6) và chỉ khi cổng cấu hình đang mở; kết nối từ mạng nhà bị đóng ngay khi accept. Truy cập SoftAP
+- Trang quản trị chỉ phục vụ kết nối tới **địa chỉ SoftAP**, từ client thuộc **subnet của SoftAP**, và chỉ
+  khi cổng cấu hình đang mở; kết nối khác bị đóng ngay khi accept. lwIP mặc định nhận gói gửi tới địa chỉ
+  của *bất kỳ* giao diện nào (weak host, `ip4.c` `ip4_input`), nên firmware gắn thêm hook
+  `LWIP_HOOK_IP4_INPUT` (cơ chế `ESP_IDF_LWIP_HOOK_FILENAME` của ESP-IDF,
+  `components/wifi_config/ip4_guard.c`) loại bỏ gói từ mạng nhà gửi tới địa chỉ 192.168.4.1. Truy cập SoftAP
   cần mật khẩu WPA2 riêng của thiết bị.
 - `Host` phải là địa chỉ AP (chống DNS rebinding); `Origin`/`Sec-Fetch-Site` khác nguồn bị từ chối; mọi API
   cần token ngẫu nhiên mỗi lần khởi động trong header `X-CSRF-Token` (trang khác nguồn không thể gửi header

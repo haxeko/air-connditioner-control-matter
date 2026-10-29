@@ -83,6 +83,9 @@ commissioner_info_t gInfo;
 bool gReady = false;
 NodeId gPairingNodeId = kUndefinedNodeId;
 NodeId gMatchingNodeId = kUndefinedNodeId; /* sensor already carries Fabric B (paired before) */
+CHIP_ERROR gPrepareError = CHIP_ERROR_INCORRECT_STATE; /* until matter_commissioner_prepare() ran */
+bool gAllowUncertified = false;                        /* user choice for the current attempt */
+size_t gPaaCount = 0;
 
 /* ------------------------------------------------------------------------------------------ */
 
@@ -157,6 +160,21 @@ public:
     }
 
     bool Active() const { return mConnecting || mClient != nullptr; }
+
+    /* CHIP thread: abandon a pending CASE connection or read (no callback fires afterwards). */
+    void Cancel()
+    {
+        if (mConnecting) {
+            mOnConnected.Cancel();
+            mOnFailure.Cancel();
+            mConnecting = false;
+        }
+        if (mClient != nullptr) {
+            Platform::Delete(mClient); /* the destructor aborts the exchange; OnDone is not called */
+            mClient = nullptr;
+        }
+        mError = CHIP_NO_ERROR;
+    }
 
 private:
     static void OnConnected(void * ctx, Messaging::ExchangeManager & exchangeMgr, const SessionHandle & session)
@@ -342,6 +360,33 @@ InfoReader gInfoReader;
 /* Attestation: strict by default, user may explicitly accept an uncertified/test device        */
 /* ------------------------------------------------------------------------------------------ */
 
+/*
+ * Failures the user may accept for a DIY/test or not-yet-listed device: the trust anchor (PAA) or the
+ * certification declaration signer is unknown to the offline store. The device has already proven
+ * possession of its DAC key at this point (DefaultDACVerifier checks the attestation signature
+ * before looking up the PAA). Forged/broken signatures, revocation, nonce or VID/PID mismatches
+ * are never accepted.
+ */
+bool OverridableAttestationFailure(Credentials::AttestationVerificationResult r)
+{
+    using R = Credentials::AttestationVerificationResult;
+    switch (r) {
+    case R::kPaaNotFound:
+    case R::kPaaExpired:
+    case R::kPaiExpired:
+    case R::kDacExpired:
+    case R::kCertificationDeclarationNoKeyId:
+    case R::kCertificationDeclarationNoCertificateFound:
+    case R::kCertificationDeclarationInvalidSignature:
+    case R::kCertificationDeclarationInvalidVendorId:
+    case R::kCertificationDeclarationInvalidProductId:
+    case R::kCertificationDeclarationInvalidPAA:
+        return true;
+    default:
+        return false;
+    }
+}
+
 class AttestationDelegate : public Credentials::DeviceAttestationDelegate
 {
 public:
@@ -356,15 +401,17 @@ public:
             return;
         }
         /* Only installed when the user ticked "accept uncertified device" for this attempt. */
-        ESP_LOGW(TAG, "attestation failed (%u) - accepted by explicit user choice", static_cast<unsigned>(result));
+        bool accept = OverridableAttestationFailure(result);
+        ESP_LOGW(TAG, "attestation failed (%u): %s", static_cast<unsigned>(result),
+                 accept ? "accepted by explicit user choice" : "not overridable, rejected");
         {
             Locked l;
-            gProgress.attestation_overridden = true;
-            snprintf(gProgress.attestation_note, sizeof(gProgress.attestation_note), "Attestation: %s",
-                     Credentials::GetAttestationResultDescription(result));
+            gProgress.attestation_overridden = accept;
+            snprintf(gProgress.attestation_note, sizeof(gProgress.attestation_note), "%s: %s",
+                     accept ? "Chấp nhận" : "Từ chối", Credentials::GetAttestationResultDescription(result));
         }
         LogErrorOnFailure(commissioner->ContinueCommissioningAfterDeviceAttestation(
-            device, Credentials::AttestationVerificationResult::kSuccess));
+            device, accept ? Credentials::AttestationVerificationResult::kSuccess : result));
     }
 };
 
@@ -410,6 +457,26 @@ public:
         }
     }
 
+    void OnCommissioningFailure(PeerId peerId, CHIP_ERROR error, CommissioningStage stageFailed,
+                                Optional<Credentials::AttestationVerificationResult> attestation) override
+    {
+        (void)peerId;
+        (void)error;
+        (void)stageFailed;
+        if (!attestation.HasValue() || attestation.Value() == Credentials::AttestationVerificationResult::kSuccess) {
+            return;
+        }
+        Credentials::AttestationVerificationResult r = attestation.Value();
+        Locked l;
+        snprintf(gProgress.error, sizeof(gProgress.error), "Xác thực thiết bị thất bại: %s",
+                 Credentials::GetAttestationResultDescription(r));
+        if (OverridableAttestationFailure(r) && !gAllowUncertified) {
+            strlcpy(gProgress.attestation_note,
+                    "Cảm biến thử nghiệm/DIY: bật ô 'chưa được chứng nhận' rồi ghép lại",
+                    sizeof(gProgress.attestation_note));
+        }
+    }
+
     void OnFabricCheck(NodeId matchingNodeId) override
     {
         if (matchingNodeId == kUndefinedNodeId) {
@@ -438,10 +505,8 @@ public:
         }
         if (error != CHIP_NO_ERROR) {
             if (error == CHIP_ERROR_FAILED_DEVICE_ATTESTATION) {
-                SetError(COMMISSIONER_FAILED,
-                         "Xác thực thiết bị (Device Attestation) thất bại: PAA không có trong kho tin cậy. "
-                         "Nếu là cảm biến DIY/thử nghiệm, bật 'chấp nhận thiết bị chưa chứng nhận'",
-                         error);
+                /* refined with the attestation result in OnCommissioningFailure(), called next */
+                SetError(COMMISSIONER_FAILED, "Xác thực thiết bị (Device Attestation) thất bại", error);
             } else {
                 SetError(COMMISSIONER_FAILED, "Commissioning thất bại", error);
             }
@@ -572,8 +637,9 @@ CHIP_ERROR InitImpl(CommonCaseDeviceServerInitParams * sp)
     /* SetDataModelProvider() inside the factory VerifyOrDie()s on active read handlers. */
     VerifyOrReturnError(InteractionModelEngine::GetInstance()->GetNumActiveReadHandlers() == 0, CHIP_ERROR_INCORRECT_STATE);
 
-    size_t paaCount = gTrustStore.Init(paa_bundle_bin_start, static_cast<size_t>(paa_bundle_bin_end - paa_bundle_bin_start));
-    ReturnErrorOnFailure(gIssuer.LoadOrCreate());
+    /* Fabric B identity and PAA store were prepared before the stack started. */
+    ReturnErrorOnFailure(gPrepareError);
+    size_t paaCount = gPaaCount;
 
     FabricTable & fabricTable = Server::GetInstance().GetFabricTable();
 
@@ -695,6 +761,7 @@ void DoStartPairing(intptr_t arg)
         goto exit;
     }
     {
+        gAllowUncertified = req->allowUncertified;
         gTrustStore.SetAllowTestPaa(req->allowUncertified);
         gDacVerifier->EnableCdTestKeySupport(req->allowUncertified);
         CommissioningParameters cp;
@@ -722,10 +789,14 @@ exit:
 
 void DoCancel(intptr_t)
 {
+    if (gRemover != nullptr) {
+        return; /* RemoveFabric cannot be interrupted half-way; its result is reported normally */
+    }
     if (gPairingNodeId != kUndefinedNodeId) {
         (void)gCommissioner.StopPairing(gPairingNodeId);
         gPairingNodeId = kUndefinedNodeId;
     }
+    gInfoReader.Cancel();
     SetError(COMMISSIONER_IDLE, "Đã hủy", CHIP_NO_ERROR);
     FinishBusy();
 }
@@ -787,6 +858,24 @@ void ResetProgress(commissioner_state_t state)
 /* ------------------------------------------------------------------------------------------ */
 /* C API                                                                                         */
 /* ------------------------------------------------------------------------------------------ */
+
+extern "C" esp_err_t matter_commissioner_prepare(void)
+{
+    if (gLock == nullptr) {
+        gLock = xSemaphoreCreateMutexStatic(&gLockBuf);
+    }
+    gPaaCount = gTrustStore.Init(paa_bundle_bin_start, static_cast<size_t>(paa_bundle_bin_end - paa_bundle_bin_start));
+    gPrepareError = gIssuer.LoadOrCreate();
+    if (gPrepareError != CHIP_NO_ERROR) {
+        {
+            Locked l;
+            snprintf(gInfo.init_error, sizeof(gInfo.init_error), "Không tạo/đọc được Fabric B: %s", gPrepareError.AsString());
+        }
+        app_log_error("commissioner", "fabric B identity: %s", gPrepareError.AsString());
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
 
 extern "C" esp_err_t matter_commissioner_init_on_chip_thread(void * server_init_params)
 {
@@ -856,16 +945,22 @@ extern "C" esp_err_t matter_commissioner_start_pairing(const char * setup_code, 
     if (req == nullptr) {
         return ESP_ERR_NO_MEM;
     }
-    /* Normalise: QR payload kept as-is (without blanks), manual code digits only. */
+    /* Normalise: blanks are removed from both forms; '-' only from the 11/21 digit manual code,
+     * because '-' is a symbol of the Base38 alphabet of "MT:" QR payloads. */
+    const char * s = setup_code;
+    while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') {
+        s++;
+    }
+    const bool isQr = (s[0] == 'M' || s[0] == 'm') && (s[1] == 'T' || s[1] == 't') && s[2] == ':';
     size_t n = 0;
-    for (const char * p = setup_code; *p && n < sizeof(req->code) - 1; p++) {
-        if (*p == ' ' || *p == '-' || *p == '\t' || *p == '\r' || *p == '\n') {
+    for (const char * c = s; *c && n < sizeof(req->code) - 1; c++) {
+        if (*c == ' ' || *c == '\t' || *c == '\r' || *c == '\n' || (!isQr && *c == '-')) {
             continue;
         }
-        req->code[n++] = *p;
+        req->code[n++] = *c;
     }
     req->code[n] = 0;
-    if (n > 3 && (req->code[0] == 'm' || req->code[0] == 'M')) {
+    if (isQr) {
         req->code[0] = 'M';
         req->code[1] = 'T';
     }
@@ -886,6 +981,11 @@ extern "C" esp_err_t matter_commissioner_cancel(void)
 {
     if (gLock == nullptr) {
         return ESP_ERR_INVALID_STATE;
+    }
+    commissioner_progress_t p;
+    matter_commissioner_get_progress(&p);
+    if (p.state == COMMISSIONER_REMOVING) {
+        return ESP_ERR_NOT_SUPPORTED;
     }
     return DeviceLayer::PlatformMgr().ScheduleWork(DoCancel, 0) == CHIP_NO_ERROR ? ESP_OK : ESP_FAIL;
 }

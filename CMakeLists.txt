@@ -28,3 +28,10 @@ idf_build_set_property(COMPILE_OPTIONS "-Wno-format-nonliteral;-Wno-format-secur
 idf_component_get_property(lwip lwip COMPONENT_LIB)
 target_compile_options(${lwip} PRIVATE "-I${CMAKE_CURRENT_LIST_DIR}/components/wifi_config/lwip_hooks")
 target_compile_definitions(${lwip} PRIVATE "ESP_IDF_LWIP_HOOK_FILENAME=\"app_lwip_hooks.h\"")
+
+# The commissioner validates sensor attestation without a trusted real-time clock (no Internet/SNTP
+# by design; mbedTLS is built without MBEDTLS_HAVE_TIME_DATE). Like the connectedhomeip ESP32 GN build
+# (src/credentials/BUILD.gn) and esp_matter's own controller builds, skip the DAC "valid at current
+# time" check; chain signatures, revocation-independent checks and the CD are still verified.
+idf_component_get_property(esp_matter_lib espressif__esp_matter COMPONENT_LIB)
+target_compile_definitions(${esp_matter_lib} PRIVATE CURRENT_TIME_NOT_IMPLEMENTED=1)

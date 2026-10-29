@@ -529,5 +529,12 @@ bool wifi_config_is_ap_client(uint32_t ip4)
 bool wifi_config_is_ap_address(uint32_t ip4)
 {
     uint32_t ap = wifi_config_ap_ip4();
-    return ap != 0 && ap == ip4;
+    if (ap == 0 || ap != ip4) {
+        return false;
+    }
+    /* The home network handed the station the very same address: both interfaces own it and the
+     * portal could be reached from the LAN, so it is not treated as the AP address. */
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip;
+    return !(sta != NULL && esp_netif_get_ip_info(sta, &ip) == ESP_OK && ip.ip.addr == ap);
 }
