@@ -1,0 +1,231 @@
+menu "AC Matter IR controller"
+
+    menu "GPIO"
+        config APP_IR_TX_GPIO
+            int "IR LED driver GPIO (to transistor/MOSFET gate/base)"
+            range 0 48
+            default 4
+            help
+                RMT TX output. The pin drives the base/gate of the IR LED transistor, active high by default.
+
+        config APP_IR_TX_INVERT
+            bool "Invert IR TX output (driver is active low)"
+            default n
+
+        config APP_IR_RX_GPIO
+            int "IR receiver (demodulating, e.g. TSOP38238/VS1838B) output GPIO"
+            range 0 48
+            default 5
+
+        config APP_IR_RX_ACTIVE_LOW
+            bool "IR receiver output is active low (typical for TSOP/VS1838)"
+            default y
+
+        config APP_BOOT_BUTTON_GPIO
+            int "BOOT button GPIO"
+            range 0 48
+            default 0
+
+        config APP_BOOT_BUTTON_ACTIVE_LOW
+            bool "BOOT button is active low"
+            default y
+
+        config APP_STATUS_LED_GPIO
+            int "Status LED GPIO (-1 = none)"
+            range -1 48
+            default -1
+            help
+                Plain LED (not WS2812). On while the configuration portal is open, blinks on IR transmission.
+    endmenu
+
+    menu "Infrared"
+        config APP_IR_CARRIER_HZ
+            int "IR carrier frequency (Hz)"
+            range 30000 60000
+            default 38000
+            help
+                Used for transmission only. A demodulating receiver cannot measure the original carrier.
+
+        config APP_IR_CARRIER_DUTY_PERCENT
+            int "IR carrier duty cycle (%)"
+            range 10 50
+            default 33
+
+        config APP_IR_RX_IDLE_US
+            int "Segment end: silence longer than this ends one received segment (us)"
+            range 3000 30000
+            default 12000
+            help
+                Longer gaps are kept: consecutive segments are chained and the measured gap is stored.
+
+        config APP_IR_RX_GLITCH_NS
+            int "Ignore pulses shorter than (ns)"
+            range 0 3000
+            default 2500
+
+        config APP_IR_LEARN_END_GAP_MS
+            int "Capture ends after this much silence following the last segment (ms)"
+            range 100 2000
+            default 400
+
+        config APP_IR_LEARN_TIMEOUT_S
+            int "Learning timeout waiting for the first IR pulse (s)"
+            range 5 60
+            default 20
+
+        config APP_IR_MAX_LEVELS
+            int "Maximum mark/space levels per learned command"
+            range 256 4096
+            default 2048
+            help
+                Captures longer than this are rejected with an explicit "buffer too small" error, never truncated.
+
+        config APP_IR_MAX_SEGMENTS
+            int "Maximum segments (frames separated by gaps) per command"
+            range 1 32
+            default 16
+
+        config APP_IR_TX_MIN_GAP_MS
+            int "Minimum pause between two transmitted commands (ms)"
+            range 100 5000
+            default 600
+
+        config APP_IR_TX_DUPLICATE_WINDOW_MS
+            int "Drop an identical command queued again within this window (ms)"
+            range 0 10000
+            default 1500
+    endmenu
+
+    menu "BOOT button (configuration portal)"
+        config APP_BUTTON_DEBOUNCE_MS
+            int "Debounce time (ms)"
+            range 10 100
+            default 40
+            help
+                The specification asks for 30-50 ms.
+
+        config APP_BUTTON_PRESS_COUNT
+            int "Number of short presses"
+            range 2 6
+            default 3
+
+        config APP_BUTTON_WINDOW_MS
+            int "All presses (first press to last release) within (ms)"
+            range 500 5000
+            default 1500
+
+        config APP_BUTTON_MAX_PRESS_MS
+            int "A press held longer than this is not a short press (ms)"
+            range 200 2000
+            default 700
+    endmenu
+
+    menu "Configuration portal (SoftAP + web)"
+        config APP_AP_SSID_PREFIX
+            string "SoftAP SSID prefix (MAC suffix appended)"
+            default "AC-Matter-"
+
+        config APP_AP_TIMEOUT_MIN
+            int "Close the portal after this many minutes without activity"
+            range 2 60
+            default 10
+
+        config APP_AP_CHANNEL
+            int "SoftAP channel when the station is not connected"
+            range 1 13
+            default 6
+
+        config APP_AP_MAX_CONN
+            int "Maximum SoftAP clients"
+            range 1 4
+            default 2
+
+        config APP_WIFI_CONNECT_TIMEOUT_S
+            int "New station credentials must connect within (s), else roll back"
+            range 10 120
+            default 40
+    endmenu
+
+    menu "Matter"
+        config APP_COMMISSIONER_UDP_PORT
+            int "UDP port of the Fabric B commissioner/controller (0 = ephemeral)"
+            range 0 65535
+            default 5542
+            help
+                Must differ from the Matter server port (5540). Only used as source port for
+                connections this device opens to sensors.
+
+        config APP_COMMISSIONING_WINDOW_S
+            int "Thermostat commissioning window length (s)"
+            range 180 900
+            default 900
+
+        config APP_SENSOR_MIN_INTERVAL_S
+            int "Sensor subscription MinIntervalFloor (s)"
+            range 0 600
+            default 30
+
+        config APP_SENSOR_MAX_INTERVAL_S
+            int "Sensor subscription MaxIntervalCeiling requested (s)"
+            range 60 3600
+            default 600
+            help
+                A sleepy sensor may negotiate a longer interval; the stale timeout follows the negotiated value.
+
+        config APP_SENSOR_RETRY_MIN_S
+            int "First retry delay after a failed CASE/subscription (s)"
+            range 1 60
+            default 5
+
+        config APP_SENSOR_RETRY_MAX_S
+            int "Maximum retry delay (exponential backoff cap) (s)"
+            range 30 3600
+            default 300
+
+        config APP_DEVICE_NAME
+            string "Default node label"
+            default "May lanh IR"
+    endmenu
+
+    menu "Local wired temperature sensor (optional fallback)"
+        choice APP_LOCAL_SENSOR
+            prompt "Local sensor"
+            default APP_LOCAL_SENSOR_NONE
+
+            config APP_LOCAL_SENSOR_NONE
+                bool "None"
+            config APP_LOCAL_SENSOR_SHT4X
+                bool "Sensirion SHT4x (I2C 0x44)"
+            config APP_LOCAL_SENSOR_SHT3X
+                bool "Sensirion SHT3x (I2C 0x44)"
+        endchoice
+
+        config APP_LOCAL_SENSOR_SDA_GPIO
+            int "I2C SDA GPIO"
+            depends on !APP_LOCAL_SENSOR_NONE
+            range 0 48
+            default 8
+
+        config APP_LOCAL_SENSOR_SCL_GPIO
+            int "I2C SCL GPIO"
+            depends on !APP_LOCAL_SENSOR_NONE
+            range 0 48
+            default 9
+
+        config APP_LOCAL_SENSOR_PERIOD_S
+            int "Local sensor sampling period (s)"
+            depends on !APP_LOCAL_SENSOR_NONE
+            range 10 600
+            default 60
+    endmenu
+
+    menu "Test mode"
+        config APP_TEST_SIMULATED_SENSOR
+            bool "Enable a simulated temperature source (bench testing only)"
+            default n
+            help
+                Adds a "simulated" temperature source settable from the web UI. It is shown as SIMULATED
+                everywhere. Never enable in a real installation.
+    endmenu
+
+endmenu

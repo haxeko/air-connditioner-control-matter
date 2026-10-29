@@ -1,0 +1,8 @@
+## Locked dependency versions (the exact resolution is recorded in dependencies.lock)
+dependencies:
+  idf:
+    version: "==6.0.2"
+  espressif/esp_matter:
+    version: "==1.6.1"
+  espressif/qrcode:
+    version: "==0.2.0"
