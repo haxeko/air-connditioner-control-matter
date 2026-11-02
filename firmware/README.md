@@ -12,8 +12,8 @@ python -m esptool --chip esp32s3 -p COM5 -b 460800 write-flash 0x0 ac_matter_ir_
 ```
 
 SHA-256:
-- `2ad198613a34aed1a70130a0daf92a70f1151fc02323c38c20c838a102f060fc`  ac_matter_ir_full_0x0.bin
-- `40016dda50162f1cc6f7fcfc0bf02e0da4a30dd1097284f2152a01caf12e1512`  ac_matter_ir_app_0x40000.bin
+- `972bc8bdd11f2733631ea7b5e98b8693bf207ed28a61b5706950e97401428357`  ac_matter_ir_full_0x0.bin
+- `25a508c3b633bb7b967a5ad8c46b576d8fb7b54c895665d2990fad63998d2427`  ac_matter_ir_app_0x40000.bin
 
 Wi-Fi cấu hình: `AC-Matter-XXXX`, mật khẩu `69696969`.
 
