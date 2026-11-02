@@ -15,5 +15,7 @@ SHA-256:
 - `2ad198613a34aed1a70130a0daf92a70f1151fc02323c38c20c838a102f060fc`  ac_matter_ir_full_0x0.bin
 - `40016dda50162f1cc6f7fcfc0bf02e0da4a30dd1097284f2152a01caf12e1512`  ac_matter_ir_app_0x40000.bin
 
+Wi-Fi cấu hình: `AC-Matter-XXXX`, mật khẩu `69696969`.
+
 Nút BOOT: 2 lần = chế độ ghép Matter (LED RGB GPIO48 nháy xanh dương), 3 lần = Wi-Fi cấu hình
 (`http://192.168.4.1`). Mã QR / mã 11 số: trang "Nhà thông minh" hoặc lệnh `secrets` trên cổng serial.

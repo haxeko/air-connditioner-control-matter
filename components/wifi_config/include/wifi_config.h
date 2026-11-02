@@ -7,7 +7,8 @@
  * it connects and reconnects on its own. This module only
  *   - creates the SoftAP netif once (192.168.4.1/24, DHCP server) and toggles the radio between
  *     STA and AP+STA - the station link (and Matter) keeps running while the portal is open;
- *   - stores per-device AP credentials (SSID = prefix + MAC suffix, random password);
+ *   - AP credentials: SSID = prefix + MAC suffix; password = the one set on the web page, else
+ *     CONFIG_APP_AP_PASSWORD (default "69696969"), else random per device;
  *   - applies new station credentials through the CHIP Wi-Fi driver, with rollback when the new
  *     network does not connect in time;
  *   - closes the portal after CONFIG_APP_AP_TIMEOUT_MIN without activity, never while a pairing or

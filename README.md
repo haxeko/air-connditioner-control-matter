@@ -277,17 +277,24 @@ Playwright): `node test/web/ui_test.js http://127.0.0.1:8080/`.
 
 ## 6. Thiết lập từng bước
 
-### Bước 1 – Lấy mật khẩu Wi-Fi cấu hình
+### Bước 1 – Wi-Fi cấu hình và mật khẩu
 
-Mỗi thiết bị có SSID riêng `AC-Matter-XXXX` (4 ký tự cuối MAC) và **mật khẩu ngẫu nhiên riêng** tạo ở lần
-khởi động đầu, lưu trong NVS. Mật khẩu **không** in ra log thường. Trong `idf.py monitor`, gõ:
+Mỗi thiết bị phát Wi-Fi cấu hình có SSID riêng `AC-Matter-XXXX` (4 ký tự cuối MAC). Mật khẩu mặc định
+(cố định, đặt bằng `CONFIG_APP_AP_PASSWORD` trong `sdkconfig.defaults`) là:
 
 ```
-secrets
+69696969
 ```
 
-Lệnh in SSID/mật khẩu Wi-Fi cấu hình và mã ghép Matter (kèm QR vẽ bằng ký tự). Các lệnh khác: `status`,
-`pairing` (chế độ ghép Matter), `portal`, `help`. Có thể đổi mật khẩu Wi-Fi cấu hình trên trang Wi-Fi (có hiệu lực ở lần mở sau).
+Thứ tự ưu tiên: mật khẩu bạn tự đổi trên trang Wi-Fi (lưu NVS, có hiệu lực ở lần mở cấu hình sau) → mật
+khẩu mặc định của firmware → nếu build với `CONFIG_APP_AP_PASSWORD=""` thì tạo mật khẩu ngẫu nhiên riêng từng
+thiết bị. Mật khẩu **không** in ra log thường; trong `idf.py monitor`, lệnh `secrets` in SSID/mật khẩu đang
+dùng và mã ghép Matter (kèm QR vẽ bằng ký tự). Các lệnh khác: `status`, `pairing` (chế độ ghép Matter),
+`portal`, `help`.
+
+> Mật khẩu cố định giống nhau cho mọi thiết bị dùng bản build này: ai biết mật khẩu và ở gần thiết bị có thể
+> vào trang cấu hình **khi nó đang mở** (sau BOOT × 3 hoặc lần khởi động đầu, tự tắt sau ~10 phút không thao
+> tác). Muốn an toàn hơn, đổi mật khẩu trên trang Wi-Fi hoặc build với mật khẩu riêng/để trống.
 
 ### Bước 2 – Kết nối Wi-Fi nhà
 
@@ -422,7 +429,7 @@ học IR hoặc thử Wi-Fi mới).
   của *bất kỳ* giao diện nào (weak host, `ip4.c` `ip4_input`), nên firmware gắn thêm hook
   `LWIP_HOOK_IP4_INPUT` (cơ chế `ESP_IDF_LWIP_HOOK_FILENAME` của ESP-IDF,
   `components/wifi_config/ip4_guard.c`) loại bỏ gói từ mạng nhà gửi tới địa chỉ 192.168.4.1. Truy cập SoftAP
-  cần mật khẩu WPA2 riêng của thiết bị.
+  cần mật khẩu WPA2 (mặc định `69696969`, đổi được trên trang Wi-Fi hoặc bằng `CONFIG_APP_AP_PASSWORD`).
 - `Host` phải là địa chỉ AP (chống DNS rebinding); `Origin`/`Sec-Fetch-Site` khác nguồn bị từ chối; mọi API
   cần token ngẫu nhiên mỗi lần khởi động trong header `X-CSRF-Token` (trang khác nguồn không thể gửi header
   tùy biến khi không có CORS); thay đổi chỉ qua POST form, kiểm tra từng trường; thân yêu cầu ≤ 2 KB.
@@ -527,7 +534,7 @@ Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng
 | LED trạng thái | `APP_STATUS_LED_WS2812` / `_SIMPLE` / `_NONE` (WS2812), `APP_STATUS_LED_GPIO` (48), `APP_STATUS_LED_ACTIVE_LOW` (n, LED thường), `APP_STATUS_LED_BRIGHTNESS` (40) |
 | IR | `APP_IR_CARRIER_HZ` (38000), `APP_IR_CARRIER_DUTY_PERCENT` (33), `APP_IR_RX_IDLE_US` (12000), `APP_IR_RX_GLITCH_NS` (2500), `APP_IR_LEARN_END_GAP_MS` (400), `APP_IR_LEARN_TIMEOUT_S` (20), `APP_IR_MAX_LEVELS` (2048), `APP_IR_MAX_SEGMENTS` (16), `APP_IR_TX_MIN_GAP_MS` (600), `APP_IR_TX_DUPLICATE_WINDOW_MS` (1500) |
 | Nút BOOT | `APP_BUTTON_DEBOUNCE_MS` (40, 30–50), `APP_BUTTON_PAIRING_PRESS_COUNT` (2, chế độ ghép), `APP_BUTTON_PRESS_COUNT` (3, cấu hình), `APP_BUTTON_WINDOW_MS` (1500), `APP_BUTTON_MAX_PRESS_MS` (700) |
-| Cổng cấu hình | `APP_AP_SSID_PREFIX` ("AC-Matter-"), `APP_AP_TIMEOUT_MIN` (10), `APP_AP_CHANNEL` (6), `APP_AP_MAX_CONN` (2), `APP_WIFI_CONNECT_TIMEOUT_S` (40) |
+| Cổng cấu hình | `APP_AP_SSID_PREFIX` ("AC-Matter-"), `APP_AP_PASSWORD` ("69696969"; rỗng = ngẫu nhiên từng thiết bị), `APP_AP_TIMEOUT_MIN` (10), `APP_AP_CHANNEL` (6), `APP_AP_MAX_CONN` (2), `APP_WIFI_CONNECT_TIMEOUT_S` (40) |
 | Matter | `APP_COMMISSIONER_UDP_PORT` (5542), `APP_COMMISSIONING_WINDOW_S` (900), `APP_SENSOR_MIN_INTERVAL_S` (30), `APP_SENSOR_MAX_INTERVAL_S` (600), `APP_SENSOR_RETRY_MIN_S` (5), `APP_SENSOR_RETRY_MAX_S` (300), `APP_DEVICE_NAME` |
 | Cảm biến cục bộ | `APP_LOCAL_SENSOR_NONE/SHT4X/SHT3X`, `..._SDA_GPIO` (8), `..._SCL_GPIO` (9), `..._PERIOD_S` (60) |
 | Thử nghiệm | `APP_TEST_SIMULATED_SENSOR` (**n**) – nguồn nhiệt độ giả lập, chỉ để thử trên bàn, hiển thị rõ “GIẢ LẬP” |

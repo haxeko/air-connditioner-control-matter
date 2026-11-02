@@ -165,6 +165,14 @@ menu "AC Matter IR controller"
             string "SoftAP SSID prefix (MAC suffix appended)"
             default "AC-Matter-"
 
+        config APP_AP_PASSWORD
+            string "SoftAP password (8-63 characters, empty = random per device)"
+            default "69696969"
+            help
+                WPA2 password of the configuration Wi-Fi (AC-Matter-XXXX). A password changed on the web
+                page is stored and takes precedence. Leave empty to generate a random password per device
+                on the first boot (printed only by the console command 'secrets').
+
         config APP_AP_TIMEOUT_MIN
             int "Close the portal after this many minutes without activity"
             range 2 60

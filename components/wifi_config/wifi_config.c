@@ -20,6 +20,13 @@ static const char *TAG = "wifi_config";
 
 #define CHECK_PERIOD_US (5 * 1000 * 1000)
 #define AP_PASSWORD_LEN 10
+#define KEY_AP_PASS_USER "ap_pass_user" /* chosen on the web page: overrides the firmware default */
+#define KEY_AP_PASS_RANDOM "ap_pass"    /* generated per device when no default is configured */
+
+/* WPA2-PSK needs 8..63 characters; an empty CONFIG_APP_AP_PASSWORD selects a random per-device password. */
+_Static_assert(sizeof(CONFIG_APP_AP_PASSWORD) == 1 ||
+                   (sizeof(CONFIG_APP_AP_PASSWORD) >= 9 && sizeof(CONFIG_APP_AP_PASSWORD) <= 64),
+               "CONFIG_APP_AP_PASSWORD must be empty or 8..63 characters");
 
 typedef struct {
     char ssid[33];
@@ -247,14 +254,23 @@ esp_err_t wifi_config_start(wifi_portal_hook_t hook)
     esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
     snprintf(s_ap_ssid, sizeof(s_ap_ssid), "%s%02X%02X", CONFIG_APP_AP_SSID_PREFIX, mac[4], mac[5]);
 
-    esp_err_t err = cfg_get_str(CFG_PART_MAIN, CFG_NS_APP, "ap_pass", s_ap_password, sizeof(s_ap_password));
-    if (err != ESP_OK || strlen(s_ap_password) < 8) {
-        generate_password(s_ap_password, AP_PASSWORD_LEN + 1);
-        err = cfg_set_str(CFG_PART_MAIN, CFG_NS_APP, "ap_pass", s_ap_password);
-        if (err != ESP_OK) {
-            return err;
+    /* SoftAP password: 1) set by the user on the web page, 2) firmware default (Kconfig), 3) random per device */
+    esp_err_t err = cfg_get_str(CFG_PART_MAIN, CFG_NS_APP, KEY_AP_PASS_USER, s_ap_password, sizeof(s_ap_password));
+    if (err == ESP_OK && strlen(s_ap_password) >= 8) {
+        ESP_LOGI(TAG, "SoftAP password: set on the configuration page");
+    } else if (sizeof(CONFIG_APP_AP_PASSWORD) > 1) {
+        strlcpy(s_ap_password, CONFIG_APP_AP_PASSWORD, sizeof(s_ap_password));
+        ESP_LOGI(TAG, "SoftAP password: firmware default (CONFIG_APP_AP_PASSWORD)");
+    } else {
+        err = cfg_get_str(CFG_PART_MAIN, CFG_NS_APP, KEY_AP_PASS_RANDOM, s_ap_password, sizeof(s_ap_password));
+        if (err != ESP_OK || strlen(s_ap_password) < 8) {
+            generate_password(s_ap_password, AP_PASSWORD_LEN + 1);
+            err = cfg_set_str(CFG_PART_MAIN, CFG_NS_APP, KEY_AP_PASS_RANDOM, s_ap_password);
+            if (err != ESP_OK) {
+                return err;
+            }
+            ESP_LOGI(TAG, "per-device SoftAP password generated (shown by the console command 'secrets')");
         }
-        ESP_LOGI(TAG, "per-device SoftAP password generated (shown by the console command 'secrets')");
     }
 
     const esp_timer_create_args_t check_args = { .callback = check_timer_cb, .name = "portal_chk" };
@@ -476,7 +492,7 @@ esp_err_t wifi_config_set_ap_password(const char *password)
             return ESP_ERR_INVALID_ARG;
         }
     }
-    esp_err_t err = cfg_set_str(CFG_PART_MAIN, CFG_NS_APP, "ap_pass", password);
+    esp_err_t err = cfg_set_str(CFG_PART_MAIN, CFG_NS_APP, KEY_AP_PASS_USER, password);
     if (err != ESP_OK) {
         return err;
     }

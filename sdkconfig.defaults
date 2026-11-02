@@ -89,3 +89,6 @@ CONFIG_RMT_RECV_FUNC_IN_IRAM=y
 # DevKitC-1 v1.1: GPIO38). Blinks blue in Matter pairing mode (BOOT x2).
 CONFIG_APP_STATUS_LED_WS2812=y
 CONFIG_APP_STATUS_LED_GPIO=48
+
+# Configuration Wi-Fi (SoftAP) password, fixed for all devices built with this configuration.
+CONFIG_APP_AP_PASSWORD="69696969"
