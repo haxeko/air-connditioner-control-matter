@@ -140,12 +140,12 @@
       <h2>Thêm thermostat vào ứng dụng nhà</h2>
       <ol class="steps">
         <li>ESP phải kết nối Wi-Fi nhà (trang Wi-Fi) và điện thoại dùng cùng mạng nhà.</li>
-        <li>Mở cửa sổ ghép bên dưới (thiết bị tự mở khi chưa thuộc hệ sinh thái nào).</li>
+        <li>Bật chế độ ghép: <b>nhấn nút BOOT 2 lần</b> (đèn LED nháy xanh dương) hoặc bấm “Mở cửa sổ ghép” bên dưới. Thiết bị tự bật chế độ này khi chưa thuộc hệ sinh thái nào.</li>
         <li>Trong Apple Home, Aqara Home, SmartThings…: Thêm thiết bị Matter, quét mã QR hoặc nhập mã số.</li>
         <li>Ứng dụng sẽ báo “thiết bị chưa được chứng nhận” vì firmware dùng chứng thư thử nghiệm của SDK: chọn vẫn thêm.</li>
       </ol>
       <dl class="kv">
-        <dt>Cửa sổ ghép</dt><dd id="hm-window">-</dd>
+        <dt>Chế độ ghép (cửa sổ ghép)</dt><dd id="hm-window">-</dd>
         <dt>Số hệ sinh thái đã ghép</dt><dd id="hm-count">-</dd>
       </dl>
       <div class="row">
@@ -155,12 +155,15 @@
       </div>
       <div class="row"><button id="hm-show" class="btn" type="button">Hiện mã ghép</button></div>
       <div id="hm-code" hidden>
-        <div id="hm-qr" class="qr"></div>
-        <dl class="kv">
-          <dt>Mã số</dt><dd id="hm-manual" class="mono big2">-</dd>
-          <dt>Nội dung QR</dt><dd id="hm-qrtext" class="mono small">-</dd>
-        </dl>
-        <p class="note">Mã này dùng để ghép thiết bị: không chia sẻ cho người khác.</p>
+        <div id="hm-label">
+          <div id="hm-qr" class="qr"></div>
+          <dl class="kv">
+            <dt>Mã số</dt><dd id="hm-manual" class="mono big2">-</dd>
+            <dt>Nội dung QR</dt><dd id="hm-qrtext" class="mono small">-</dd>
+          </dl>
+        </div>
+        <div class="row"><button id="hm-print" class="btn" type="button">In tem mã ghép</button></div>
+        <p class="note">QR và mã số là cố định cho thiết bị này (tạo ngẫu nhiên ở lần khởi động đầu): có thể in tem dán lên thiết bị để lần sau chỉ cần nhấn BOOT 2 lần rồi quét. Không chia sẻ mã cho người khác.</p>
       </div>
     </div>
     <div class="card">

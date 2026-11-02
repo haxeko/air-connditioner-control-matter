@@ -30,12 +30,43 @@ menu "AC Matter IR controller"
             bool "BOOT button is active low"
             default y
 
-        config APP_STATUS_LED_GPIO
-            int "Status LED GPIO (-1 = none)"
-            range -1 48
-            default -1
+    endmenu
+
+    menu "Status LED"
+        choice APP_STATUS_LED_TYPE
+            prompt "Status LED type"
+            default APP_STATUS_LED_WS2812
             help
-                Plain LED (not WS2812). On while the configuration portal is open, blinks on IR transmission.
+                Blinking blue: Matter pairing mode (commissioning window open). Steady green: configuration
+                Wi-Fi open. Green for 2 s: added to a home ecosystem. Fast red blinks: action refused.
+
+            config APP_STATUS_LED_WS2812
+                bool "Addressable RGB LED (WS2812/SK6812)"
+            config APP_STATUS_LED_SIMPLE
+                bool "Plain single-colour LED on a GPIO"
+            config APP_STATUS_LED_NONE
+                bool "None"
+        endchoice
+
+        config APP_STATUS_LED_GPIO
+            int "Status LED GPIO"
+            depends on !APP_STATUS_LED_NONE
+            range 0 48
+            default 48
+            help
+                ESP32-S3-DevKitC-1 v1.0 and most N16R8 boards: RGB LED on GPIO48 (DevKitC-1 v1.1: GPIO38).
+                Never use GPIO33-37 on N16R8 modules (octal PSRAM).
+
+        config APP_STATUS_LED_ACTIVE_LOW
+            bool "Plain LED is active low"
+            depends on APP_STATUS_LED_SIMPLE
+            default n
+
+        config APP_STATUS_LED_BRIGHTNESS
+            int "RGB LED brightness (1-255)"
+            depends on APP_STATUS_LED_WS2812
+            range 1 255
+            default 40
     endmenu
 
     menu "Infrared"
@@ -105,9 +136,18 @@ menu "AC Matter IR controller"
                 A level change of the BOOT button is accepted after it has been stable this long.
 
         config APP_BUTTON_PRESS_COUNT
-            int "Number of short presses"
+            int "Short presses that open the configuration portal"
             range 2 6
             default 3
+
+        config APP_BUTTON_PAIRING_PRESS_COUNT
+            int "Short presses that open Matter pairing mode (commissioning window)"
+            range 2 6
+            default 2
+            help
+                Must differ from APP_BUTTON_PRESS_COUNT. Opens the thermostat commissioning window for
+                APP_COMMISSIONING_WINDOW_S seconds (pair with the QR code or the 11-digit code); the status
+                LED blinks blue while the window is open.
 
         config APP_BUTTON_WINDOW_MS
             int "All presses (first press to last release) within (ms)"

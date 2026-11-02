@@ -1,15 +1,18 @@
 #pragma once
 
 /*
- * N-short-press detector (pure C, host tested).
+ * Short-press sequence detector (pure C, host tested).
  *
  * Input: raw button samples (pressed / released) with a millisecond timestamp, in time order.
  * - A level change is accepted only after it has been stable for debounce_ms.
  * - A short press is press + release with the pressed time <= max_press_ms; a longer hold cancels
- *   the sequence (it is not a short press).
- * - The sequence fires when `count` short presses complete (last release) within window_ms
- *   measured from the first accepted press. A missed window restarts from the latest press.
- * - The detector fires once per sequence; one or two presses never fire.
+ *   the whole sequence (it is not a short press and reports nothing).
+ * - A sequence starts with the first press. It ends, and its number of short presses is reported:
+ *     * immediately when max_count presses are complete (no need to wait), or
+ *     * when window_ms have elapsed since its first press (while the button is released).
+ *   A press starting after the window belongs to the next sequence.
+ * Example with max_count 3, window 1.5 s: 3 quick presses -> 3 at the third release; 2 presses -> 2
+ * after 1.5 s; 1 press -> 1 after 1.5 s (callers ignore counts they do not use).
  */
 
 #include <stdbool.h>
@@ -23,7 +26,7 @@ typedef struct {
     uint32_t debounce_ms;
     uint32_t window_ms;
     uint32_t max_press_ms;
-    uint8_t count;
+    uint8_t max_count;
 } press_detector_cfg_t;
 
 typedef struct {
@@ -34,13 +37,14 @@ typedef struct {
     int64_t press_start;      /* time of the current debounced press */
     int64_t first_press;      /* time of the first press of the sequence */
     uint8_t presses;          /* completed short presses in the sequence */
+    bool in_sequence;         /* a sequence was started (first press seen) */
     bool hold_cancelled;      /* current press exceeded max_press_ms */
 } press_detector_t;
 
 void press_detector_init(press_detector_t *d, const press_detector_cfg_t *cfg);
 
-/** Feed one raw sample. Returns true exactly when the N-press sequence completes. */
-bool press_detector_feed(press_detector_t *d, bool raw_pressed, int64_t now_ms);
+/** Feed one raw sample. Returns 0, or the number of short presses of a sequence that just ended. */
+uint8_t press_detector_feed(press_detector_t *d, bool raw_pressed, int64_t now_ms);
 
 /** True while a sequence or a debounce is in progress (the task keeps sampling). */
 bool press_detector_busy(const press_detector_t *d, int64_t now_ms);

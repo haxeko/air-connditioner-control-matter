@@ -60,7 +60,8 @@ function check(cond, what) {
     await page.waitForSelector('#hm-qr svg path');
     check((await txt('#hm-manual')) === '3497-011-2332', 'manual code formatted');
     await page.click('#hm-open');
-    await page.waitForFunction(() => document.getElementById('hm-window').textContent === 'Đang mở');
+    await page.waitForFunction(() => document.getElementById('hm-window').textContent.startsWith('Đang bật'));
+    check((await page.locator('#hm-print').isVisible()), 'printable pairing label offered');
     check(true, 'commissioning window opened');
     await shot('03-home');
 

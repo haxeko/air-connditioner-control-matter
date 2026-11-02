@@ -69,6 +69,17 @@ typedef struct {
     char label[33];
 } matter_fabric_info_t;
 
+/* Commissioning state changes for user feedback (status LED). */
+typedef enum {
+    MATTER_UI_WINDOW_OPENED = 0, /* pairing mode: the thermostat can be added with its QR/manual code */
+    MATTER_UI_WINDOW_CLOSED,
+    MATTER_UI_COMMISSIONED,      /* added to a home ecosystem */
+} matter_ui_event_t;
+
+/** Called on the CHIP thread; must not block. Register before matter_thermostat_start(). */
+typedef void (*matter_ui_event_cb_t)(matter_ui_event_t ev);
+void matter_thermostat_set_ui_callback(matter_ui_event_cb_t cb);
+
 /** Create node + thermostat endpoint. Call once before matter_thermostat_start(). */
 esp_err_t matter_thermostat_create(const thermostat_caps_t *caps, thermostat_user_change_cb_t cb);
 

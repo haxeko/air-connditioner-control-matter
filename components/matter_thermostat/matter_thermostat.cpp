@@ -47,6 +47,14 @@ bool sStarted;
 SemaphoreHandle_t sInitDone;
 StaticSemaphore_t sInitDoneBuf;
 bool sRestoring; /* boot-time clamping: attribute updates are not user changes */
+matter_ui_event_cb_t sUiCb;
+
+void NotifyUi(matter_ui_event_t ev)
+{
+    if (sUiCb) {
+        sUiCb(ev);
+    }
+}
 
 struct Guard
 {
@@ -177,6 +185,7 @@ void AppEventCallback(const ChipDeviceEvent * event, intptr_t arg)
     switch (event->Type) {
     case DeviceEventType::kCommissioningComplete:
         ESP_LOGI(TAG, "added to a home ecosystem");
+        NotifyUi(MATTER_UI_COMMISSIONED);
         break;
     case DeviceEventType::kFailSafeTimerExpired:
         app_log_error("thermostat", "commissioning by the hub failed (fail-safe expired)");
@@ -186,10 +195,12 @@ void AppEventCallback(const ChipDeviceEvent * event, intptr_t arg)
         OpenWindowIfUncommissioned();
         break;
     case DeviceEventType::kCommissioningWindowOpened:
-        ESP_LOGI(TAG, "commissioning window opened");
+        ESP_LOGI(TAG, "pairing mode: commissioning window opened");
+        NotifyUi(MATTER_UI_WINDOW_OPENED);
         break;
     case DeviceEventType::kCommissioningWindowClosed:
-        ESP_LOGI(TAG, "commissioning window closed");
+        ESP_LOGI(TAG, "pairing mode ended: commissioning window closed");
+        NotifyUi(MATTER_UI_WINDOW_CLOSED);
         break;
     default:
         break;
@@ -333,6 +344,11 @@ void CloseWindowWork(intptr_t)
 }
 
 } // namespace
+
+extern "C" void matter_thermostat_set_ui_callback(matter_ui_event_cb_t cb)
+{
+    sUiCb = cb;
+}
 
 extern "C" esp_err_t matter_thermostat_create(const thermostat_caps_t * caps, thermostat_user_change_cb_t cb)
 {

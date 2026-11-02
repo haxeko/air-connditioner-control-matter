@@ -142,3 +142,18 @@ table.tbl tr { cursor: pointer; }
 
 details { margin-top: .6rem; }
 summary { cursor: pointer; color: var(--muted); }
+
+/* "In tem mã ghép": print only the QR code and the manual code */
+@media print {
+  body.print-label > *:not(main) { display: none !important; }
+  body.print-label main > section:not(#page-home) { display: none !important; }
+  body.print-label #page-home .card:not(:first-child),
+  body.print-label #page-home .card > *:not(#hm-code),
+  body.print-label #hm-code > *:not(#hm-label) { display: none !important; }
+  body.print-label .card { border: 0; padding: 0; }
+  body.print-label #hm-label { width: 60mm; }
+  body.print-label #hm-label .qr { max-width: 50mm; margin: 0; }
+  body.print-label #hm-label dl.kv { grid-template-columns: auto 1fr; color: #000; }
+  body.print-label #hm-manual { white-space: nowrap; }
+  body.print-label #hm-label { width: 70mm; }
+}

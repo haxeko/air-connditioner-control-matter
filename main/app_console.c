@@ -65,6 +65,15 @@ static int cmd_portal(int argc, char **argv)
     return err == ESP_OK ? 0 : 1;
 }
 
+static int cmd_pairing(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    esp_err_t err = matter_thermostat_open_commissioning_window(CONFIG_APP_COMMISSIONING_WINDOW_S);
+    printf("pairing mode: %s\n", err == ESP_OK ? "commissioning window open (code/QR: 'secrets')" : esp_err_to_name(err));
+    return err == ESP_OK ? 0 : 1;
+}
+
 static int cmd_status(int argc, char **argv)
 {
     (void)argc;
@@ -126,6 +135,7 @@ void app_console_start(void)
     const esp_console_cmd_t cmds[] = {
         { .command = "secrets", .help = "Print the SoftAP password and the Matter onboarding code", .func = cmd_secrets },
         { .command = "portal", .help = "Open the configuration portal (same as BOOT x3)", .func = cmd_portal },
+        { .command = "pairing", .help = "Matter pairing mode: open the commissioning window (same as BOOT x2)", .func = cmd_pairing },
         { .command = "status", .help = "Short status", .func = cmd_status },
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
@@ -137,5 +147,5 @@ void app_console_start(void)
         app_log_error("console", "start: %s", esp_err_to_name(err));
         return;
     }
-    ESP_LOGI(TAG, "console ready: 'help', 'status', 'secrets', 'portal'");
+    ESP_LOGI(TAG, "console ready: 'help', 'status', 'secrets', 'pairing', 'portal'");
 }

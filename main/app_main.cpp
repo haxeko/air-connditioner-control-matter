@@ -3,6 +3,7 @@
  *
  *   hub (Fabric A) --Thermostat writes--> matter_thermostat --> climate_control --> ac_profiles --> ir_transceiver
  *   sensor (Fabric B) --subscription--> remote_temperature --> LocalTemperature + climate_control
+ *   BOOT x2 --> button_handler --> Matter pairing mode (commissioning window), status LED blinks blue
  *   BOOT x3 --> button_handler --> wifi_config (SoftAP) --> web_config (portal, started once)
  *
  * Start order matters:
@@ -26,6 +27,7 @@
 #include "matter_thermostat.h"
 #include "remote_temperature.h"
 #include "sdkconfig.h"
+#include "status_led.h"
 #include "web_config.h"
 #include "wifi_config.h"
 
@@ -40,6 +42,8 @@ static_assert(TSTAT_MODE_OFF == CLIMATE_MODE_OFF && TSTAT_MODE_COOL == CLIMATE_M
                   TSTAT_MODE_HEAT == CLIMATE_MODE_HEAT && TSTAT_MODE_FAN_ONLY == CLIMATE_MODE_FAN_ONLY &&
                   TSTAT_MODE_DRY == CLIMATE_MODE_DRY,
               "SystemMode values");
+static_assert(CONFIG_APP_BUTTON_PAIRING_PRESS_COUNT != CONFIG_APP_BUTTON_PRESS_COUNT,
+              "BOOT gestures for pairing mode and for the portal must differ");
 
 /* CHIP thread: only posts to the climate task queue. */
 static void on_thermostat_change(const thermostat_user_state_t * s, uint32_t mask)
@@ -55,14 +59,69 @@ static void on_temperature(bool valid, int16_t centi, temp_source_t source)
     climate_control_post_temperature(valid, centi);
 }
 
-/* Button task context (never the ISR). */
-static void on_boot_sequence(void)
+/* Pairing mode: open the thermostat commissioning window (QR code / 11-digit code). */
+static void open_pairing_mode(void)
 {
-    ESP_LOGI(TAG, "BOOT pressed %d times: configuration portal", CONFIG_APP_BUTTON_PRESS_COUNT);
-    esp_err_t err = wifi_config_portal_open(); /* opens, or extends when already open */
+    wifi_status_t ws;
+    wifi_config_get_status(&ws);
+    if (!ws.sta_connected)
+    {
+        /* on-network commissioning only: without the home Wi-Fi no app can find the device */
+        app_log_error("app", "pairing mode refused: not connected to the home Wi-Fi (BOOT x%d to configure it)",
+                      CONFIG_APP_BUTTON_PRESS_COUNT);
+        status_led_event(STATUS_LED_EVENT_ERROR);
+        return;
+    }
+    esp_err_t err = matter_thermostat_open_commissioning_window(CONFIG_APP_COMMISSIONING_WINDOW_S);
     if (err != ESP_OK)
     {
-        app_log_error("app", "portal: %s", esp_err_to_name(err));
+        app_log_error("app", "pairing mode: %s", esp_err_to_name(err));
+        status_led_event(STATUS_LED_EVENT_ERROR);
+        return;
+    }
+    ESP_LOGI(TAG, "Matter pairing mode for %d s: add the thermostat with its QR code or 11-digit code",
+             CONFIG_APP_COMMISSIONING_WINDOW_S);
+}
+
+/* Button task context (never the ISR). */
+static void on_boot_sequence(uint8_t presses)
+{
+    if (presses == CONFIG_APP_BUTTON_PAIRING_PRESS_COUNT)
+    {
+        ESP_LOGI(TAG, "BOOT x%u: Matter pairing mode", presses);
+        open_pairing_mode(); /* reopening while open restarts the timeout */
+    }
+    else if (presses == CONFIG_APP_BUTTON_PRESS_COUNT)
+    {
+        ESP_LOGI(TAG, "BOOT x%u: configuration portal", presses);
+        esp_err_t err = wifi_config_portal_open(); /* opens, or extends when already open */
+        if (err != ESP_OK)
+        {
+            app_log_error("app", "portal: %s", esp_err_to_name(err));
+        }
+    }
+}
+
+static void on_portal(bool open)
+{
+    web_config_portal_hook(open);
+    status_led_set(STATUS_LED_PORTAL, open);
+}
+
+/* CHIP thread: non-blocking LED update only. */
+static void on_matter_ui(matter_ui_event_t ev)
+{
+    switch (ev)
+    {
+    case MATTER_UI_WINDOW_OPENED:
+        status_led_set(STATUS_LED_PAIRING, true);
+        break;
+    case MATTER_UI_WINDOW_CLOSED:
+        status_led_set(STATUS_LED_PAIRING, false);
+        break;
+    case MATTER_UI_COMMISSIONED:
+        status_led_event(STATUS_LED_EVENT_PAIRED);
+        break;
     }
 }
 
@@ -84,6 +143,7 @@ extern "C" void app_main(void)
     {
         ESP_ERROR_CHECK(err);
     }
+    non_fatal("status LED", status_led_init());
     ESP_ERROR_CHECK(wifi_config_early_init());
 
     app_config_t cfg;
@@ -108,6 +168,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(climate_control_start(&cfg));
 
     ESP_ERROR_CHECK(matter_thermostat_create(&caps, on_thermostat_change));
+    matter_thermostat_set_ui_callback(on_matter_ui); /* before start: an uncommissioned device opens the window at boot */
     err = matter_thermostat_start();
     if (err == ESP_ERR_TIMEOUT)
     {
@@ -122,7 +183,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(remote_temperature_init(&cfg, on_temperature));
     non_fatal("remote temperature", remote_temperature_start());
 
-    ESP_ERROR_CHECK(wifi_config_start(web_config_portal_hook));
+    ESP_ERROR_CHECK(wifi_config_start(on_portal));
     non_fatal("BOOT button", button_handler_start(on_boot_sequence));
     app_console_start();
     ESP_LOGI(TAG, "running");

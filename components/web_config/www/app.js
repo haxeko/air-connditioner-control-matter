@@ -338,7 +338,7 @@
   loaders.home = async (user) => {
     const j = await api('matter', null, user);
     const m = j.matter;
-    text('hm-window', m.window_open ? 'Đang mở' : 'Đóng');
+    text('hm-window', m.window_open ? 'Đang bật (LED nháy xanh dương)' : 'Tắt (nhấn BOOT 2 lần để bật)');
     text('hm-count', m.home_fabrics);
     const sel = $('hm-minutes');
     if (!sel.options.length) {
@@ -355,6 +355,11 @@
 
   $('hm-open').addEventListener('click', () => act('matter/window', { action: 'open', minutes: $('hm-minutes').value }, 'Đã mở cửa sổ ghép'));
   $('hm-close').addEventListener('click', () => act('matter/window', { action: 'close' }, 'Đã đóng cửa sổ ghép'));
+  $('hm-print').addEventListener('click', () => {
+    document.body.classList.add('print-label');
+    window.print();
+    document.body.classList.remove('print-label');
+  });
   $('hm-show').addEventListener('click', async () => {
     try {
       const j = await api('matter/onboarding', null, true);

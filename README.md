@@ -8,6 +8,8 @@ ESP32-S3 N16R8:
 - tự tạo **fabric riêng (Fabric B)** để ghép cảm biến nhiệt độ Matter đã có trong nhà bằng Multi-Admin,
   rồi **subscribe** trực tiếp nhiệt độ của cảm biến (kể cả cảm biến Thread qua Border Router sẵn có);
 - điều khiển máy lạnh bằng **hồng ngoại học từ remote gốc** (RMT native của ESP-IDF);
+- **nhấn BOOT 2 lần** để vào **chế độ ghép Matter** (LED RGB nháy xanh dương), rồi thêm thiết bị bằng
+  **mã QR hoặc mã 11 số**;
 - **nhấn BOOT 3 lần** để mở Wi-Fi cấu hình và trang web tiếng Việt tại `http://192.168.4.1`;
 - lưu mọi cấu hình vào flash: mất điện không phải thiết lập lại.
 
@@ -55,7 +57,7 @@ flowchart LR
         IR["ir_transceiver<br/>RMT TX/RX"]
         WIFI["wifi_config<br/>STA + SoftAP (AP+STA)"]
         WEB["web_config<br/>esp_http_server, chỉ trên AP"]
-        BTN["button_handler<br/>BOOT x3"]
+        BTN["button_handler<br/>BOOT x2: ghép Matter / x3: cấu hình"]
     end
 
     HUB -- "setpoint, SystemMode (Fabric A)" --> SRV
@@ -185,7 +187,7 @@ octal), tránh chân strapping GPIO0/3/45/46 cho ngoại vi khác.
 | Đầu thu IR 38 kHz (TSOP38238, VS1838B…) | **GPIO5** | Ngõ ra tích cực mức thấp (mặc định); pull-up nội đã bật |
 | Nút BOOT | **GPIO0** | Có sẵn trên bo, tích cực mức thấp |
 | Cảm biến cục bộ SHT4x/SHT3x (tùy chọn) | SDA **GPIO8**, SCL **GPIO9** | Địa chỉ 0x44, chỉ dùng làm dự phòng |
-| LED trạng thái (tùy chọn) | tắt (`-1`) | Sáng khi Wi-Fi cấu hình đang mở |
+| LED trạng thái | **GPIO48**, LED RGB WS2812 có sẵn trên bo | Nháy **xanh dương**: chế độ ghép Matter; xanh lá liên tục: Wi-Fi cấu hình đang mở; xanh lá 2 s: đã thêm vào ứng dụng nhà; 3 lần nháy đỏ: thao tác bị từ chối (chưa có Wi-Fi nhà). DevKitC-1 v1.1: GPIO38. Có thể chọn LED thường hoặc không dùng (Kconfig) |
 
 Mạch phát IR (dòng xung LED lớn hơn khả năng của GPIO, phải qua transistor):
 
@@ -285,7 +287,7 @@ secrets
 ```
 
 Lệnh in SSID/mật khẩu Wi-Fi cấu hình và mã ghép Matter (kèm QR vẽ bằng ký tự). Các lệnh khác: `status`,
-`portal`, `help`. Có thể đổi mật khẩu Wi-Fi cấu hình trên trang Wi-Fi (có hiệu lực ở lần mở sau).
+`pairing` (chế độ ghép Matter), `portal`, `help`. Có thể đổi mật khẩu Wi-Fi cấu hình trên trang Wi-Fi (có hiệu lực ở lần mở sau).
 
 ### Bước 2 – Kết nối Wi-Fi nhà
 
@@ -298,16 +300,21 @@ Lệnh in SSID/mật khẩu Wi-Fi cấu hình và mã ghép Matter (kèm QR vẽ
 Wi-Fi nhà (STA) luôn được giữ khi Wi-Fi cấu hình đang mở (chế độ AP+STA) nên Matter và subscription cảm
 biến không bị gián đoạn.
 
-### Bước 3 – Thêm thermostat vào ứng dụng nhà (Fabric A)
+### Bước 3 – Thêm thermostat vào ứng dụng nhà (Fabric A) bằng mã QR hoặc mã số
 
-1. Tab **Nhà thông minh** → *Hiện mã ghép* (QR + mã 11 số). Khi thiết bị chưa thuộc hệ sinh thái nào, cửa
-   sổ ghép tự mở 15 phút sau mỗi lần khởi động; có thể mở lại bằng nút *Mở cửa sổ ghép*.
-2. Điện thoại ở cùng mạng Wi-Fi nhà. Trong Apple Home / Aqara Home / SmartThings: thêm thiết bị Matter, quét
-   QR hoặc nhập mã.
+1. Lấy **mã QR và mã 11 số** của thiết bị: tab **Nhà thông minh** → *Hiện mã ghép* (có nút *In tem mã ghép*
+   để in tem dán lên thiết bị), hoặc lệnh `secrets` trên cổng serial. Mã là cố định cho từng thiết bị (tạo
+   ngẫu nhiên ở lần khởi động đầu, lưu NVS).
+2. Bật **chế độ ghép**: **nhấn nút BOOT 2 lần** (trong 1,5 s) → LED **nháy xanh dương** trong suốt thời gian
+   cho phép ghép (15 phút). Thiết bị phải đã kết nối Wi-Fi nhà; nếu chưa, LED nháy đỏ 3 lần và không mở chế độ
+   ghép. Khi thiết bị chưa thuộc hệ sinh thái nào, chế độ ghép tự bật 15 phút sau mỗi lần khởi động. Cũng có
+   thể bật bằng nút *Mở cửa sổ ghép* trên web hoặc lệnh `pairing`.
+3. Điện thoại ở cùng mạng Wi-Fi nhà. Trong Apple Home / Aqara Home / SmartThings: thêm thiết bị Matter, quét
+   QR hoặc nhập mã số. Ghép xong, LED sáng xanh lá 2 s rồi tắt.
 3. Firmware dùng **chứng thư thiết bị thử nghiệm của SDK** (VID 0xFFF1): ứng dụng sẽ cảnh báo “thiết bị
    chưa được chứng nhận” – chọn vẫn thêm. Một số ứng dụng cần bật chế độ nhà phát triển/thiết bị thử nghiệm.
 4. Muốn thêm vào hệ sinh thái thứ hai: dùng chức năng chia sẻ (Multi-Admin) của hệ sinh thái thứ nhất, hoặc
-   mở lại cửa sổ ghép trên web.
+   nhấn BOOT 2 lần rồi dùng lại mã QR/mã số của thiết bị.
 
 ### Bước 4 – Học lệnh IR và khóa profile
 
@@ -438,9 +445,9 @@ học IR hoặc thử Wi-Fi mới).
 
 | Hạng mục | Cách thử | Kết quả |
 |---|---|---|
-| Logic thuần: nút BOOT, mã IR & ghép đoạn, khóa/chọn lệnh full-state, thuật toán bù, stale/backoff/CRC SHT, kiểm tra cấu hình, JSON/form/UTF-8 của web | `make -C test/host` (gcc, AddressSanitizer + UBSan) | 25 339 kiểm tra đạt; test đột biến (cấy lỗi) đều bị phát hiện |
+| Logic thuần: nút BOOT, mã IR & ghép đoạn, khóa/chọn lệnh full-state, thuật toán bù, stale/backoff/CRC SHT, kiểm tra cấu hình, JSON/form/UTF-8 của web | `make -C test/host` (gcc, AddressSanitizer + UBSan) | 25 349 kiểm tra đạt; test đột biến (cấy lỗi) đều bị phát hiện |
 | Giao diện web: mọi trang, ghép cảm biến giả, học IR giả, khóa profile, điều khiển, thuật toán, chẩn đoán, thoát; SSID chứa HTML hiển thị như văn bản | `test/web/ui_test.js` + `mock_server.py` trong Chromium headless, màn hình 390×844 | Đạt, không lỗi JavaScript |
-| Một/hai lần BOOT không mở cấu hình, ba lần mở; nhấn giữ hủy chuỗi; dội phím bị lọc | unit test `press_detector` | Đạt |
+| BOOT: 1 lần không làm gì, 2 lần = chế độ ghép Matter, 3 lần = cấu hình; nhấn giữ hủy chuỗi; dội phím bị lọc | unit test `press_detector` | Đạt |
 | Off không bị thuật toán ghi đè; không tự bật | unit test `climate_algo` | Đạt |
 | Không phát tổ hợp raw chưa học, không đổi chế độ | unit test `ac_resolve` | Đạt |
 | Khung IR dài/nhiều đoạn không bị cắt âm thầm | unit test `ir_code`/`ir_capture` | Đạt |
@@ -453,7 +460,7 @@ học IR hoặc thử Wi-Fi mới).
 | 2. Ghép cảm biến thật bằng Multi-Admin, đọc và subscribe | Đã cài đặt; cần cảm biến + hub |
 | 3. Reboot/mất điện: tự subscribe lại, không cần ghép lại; fabric và profile còn nguyên | Đã cài đặt (NVS); cần thiết bị |
 | 4. Thêm thermostat vào Apple Home/Aqara/SmartThings, cập nhật nhiệt độ, nhận setpoint | Đã cài đặt; cần hub |
-| 5. BOOT × 3 trên GPIO0 thật, AP+STA, web trên điện thoại | Logic + UI đã thử; cần bo + điện thoại |
+| 5. BOOT × 2 / × 3 trên GPIO0 thật, LED RGB, AP+STA, web trên điện thoại | Logic + UI đã thử; cần bo + điện thoại |
 | 6. Thu/phát IR với remote và máy lạnh thật | Đã cài đặt; cần mạch IR + máy lạnh |
 | 7. Thuật toán trên phòng thật; mất cảm biến không phát lệnh sai | Logic đã thử; cần phần cứng |
 | AP+STA không làm mất đường mạng tới cảm biến | Thiết kế giữ STA; cần đo thực tế |
@@ -470,9 +477,10 @@ Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng
 1. **Khởi động hai vai trò** – log có `thermostat endpoint 1 …` và
    `commissioner ready: fabric index …, fabric 0x…, node 0x… (created)`; lần khởi động sau là `(restored)`
    với cùng fabric ID (không tạo fabric mới).
-2. **BOOT** – nhấn 1 lần, rồi 2 lần: không có log `portal open`. Nhấn 3 lần trong 1,5 s: log
-   `portal open: SSID AC-Matter-XXXX`. Nhấn 3 lần lần nữa: `portal already open: lifetime extended`. Giữ nút
-   lâu: không có gì xảy ra (không factory reset).
+2. **BOOT** – nhấn 1 lần: không có gì. Nhấn 2 lần: sau ~1,5 s log `BOOT x2: Matter pairing mode` và
+   `pairing mode: commissioning window opened`, LED nháy xanh dương; hết 15 phút hoặc ghép xong thì LED tắt.
+   Nhấn 3 lần trong 1,5 s: log `portal open: SSID AC-Matter-XXXX`, LED xanh lá. Nhấn 3 lần lần nữa:
+   `portal already open: lifetime extended`. Giữ nút lâu: không có gì xảy ra (không factory reset).
 3. **Ghép cảm biến** – theo bước 5; trang Cảm biến hiển thị endpoint và giá trị đọc thử; sau khi Lưu, trạng
    thái “Đã subscribe”, log `subscription … established: interval a..b s, stale after c s`.
 4. **Cảm biến vẫn chạy ở hệ sinh thái cũ** – kiểm tra cảm biến vẫn cập nhật trong ứng dụng gốc.
@@ -515,9 +523,10 @@ Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng
 
 | Nhóm | Tùy chọn chính (mặc định) |
 |---|---|
-| GPIO | `APP_IR_TX_GPIO` (4), `APP_IR_TX_INVERT` (n), `APP_IR_RX_GPIO` (5), `APP_IR_RX_ACTIVE_LOW` (y), `APP_BOOT_BUTTON_GPIO` (0), `APP_BOOT_BUTTON_ACTIVE_LOW` (y), `APP_STATUS_LED_GPIO` (−1) |
+| GPIO | `APP_IR_TX_GPIO` (4), `APP_IR_TX_INVERT` (n), `APP_IR_RX_GPIO` (5), `APP_IR_RX_ACTIVE_LOW` (y), `APP_BOOT_BUTTON_GPIO` (0), `APP_BOOT_BUTTON_ACTIVE_LOW` (y) |
+| LED trạng thái | `APP_STATUS_LED_WS2812` / `_SIMPLE` / `_NONE` (WS2812), `APP_STATUS_LED_GPIO` (48), `APP_STATUS_LED_ACTIVE_LOW` (n, LED thường), `APP_STATUS_LED_BRIGHTNESS` (40) |
 | IR | `APP_IR_CARRIER_HZ` (38000), `APP_IR_CARRIER_DUTY_PERCENT` (33), `APP_IR_RX_IDLE_US` (12000), `APP_IR_RX_GLITCH_NS` (2500), `APP_IR_LEARN_END_GAP_MS` (400), `APP_IR_LEARN_TIMEOUT_S` (20), `APP_IR_MAX_LEVELS` (2048), `APP_IR_MAX_SEGMENTS` (16), `APP_IR_TX_MIN_GAP_MS` (600), `APP_IR_TX_DUPLICATE_WINDOW_MS` (1500) |
-| Nút BOOT | `APP_BUTTON_DEBOUNCE_MS` (40, 30–50), `APP_BUTTON_PRESS_COUNT` (3), `APP_BUTTON_WINDOW_MS` (1500), `APP_BUTTON_MAX_PRESS_MS` (700) |
+| Nút BOOT | `APP_BUTTON_DEBOUNCE_MS` (40, 30–50), `APP_BUTTON_PAIRING_PRESS_COUNT` (2, chế độ ghép), `APP_BUTTON_PRESS_COUNT` (3, cấu hình), `APP_BUTTON_WINDOW_MS` (1500), `APP_BUTTON_MAX_PRESS_MS` (700) |
 | Cổng cấu hình | `APP_AP_SSID_PREFIX` ("AC-Matter-"), `APP_AP_TIMEOUT_MIN` (10), `APP_AP_CHANNEL` (6), `APP_AP_MAX_CONN` (2), `APP_WIFI_CONNECT_TIMEOUT_S` (40) |
 | Matter | `APP_COMMISSIONER_UDP_PORT` (5542), `APP_COMMISSIONING_WINDOW_S` (900), `APP_SENSOR_MIN_INTERVAL_S` (30), `APP_SENSOR_MAX_INTERVAL_S` (600), `APP_SENSOR_RETRY_MIN_S` (5), `APP_SENSOR_RETRY_MAX_S` (300), `APP_DEVICE_NAME` |
 | Cảm biến cục bộ | `APP_LOCAL_SENSOR_NONE/SHT4X/SHT3X`, `..._SDA_GPIO` (8), `..._SCL_GPIO` (9), `..._PERIOD_S` (60) |
@@ -542,7 +551,8 @@ components/
   climate_control/       thuật toán Direct/bù (thuần C) + tác vụ điều khiển
   ac_profiles/           mô hình trạng thái full-state, profile, resolver, interface driver giao thức
   ir_transceiver/        RMT học/phát, định dạng mã IR, ghép đoạn
-  button_handler/        phát hiện BOOT × N (thuần C) + tác vụ đọc nút
+  button_handler/        đếm số lần nhấn BOOT (thuần C) + tác vụ đọc nút
+  status_led/            LED trạng thái: WS2812 qua RMT hoặc LED thường
   wifi_config/           SoftAP/AP+STA, mật khẩu AP riêng, đổi Wi-Fi qua driver CHIP + rollback
   web_config/            esp_http_server, API, kiểm soát truy cập, giao diện offline (www/, nhúng gzip)
 test/host/               unit test gcc cho phần thuần

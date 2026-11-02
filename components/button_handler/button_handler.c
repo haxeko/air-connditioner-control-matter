@@ -46,7 +46,10 @@ static void task(void *arg)
         .debounce_ms = CONFIG_APP_BUTTON_DEBOUNCE_MS,
         .window_ms = CONFIG_APP_BUTTON_WINDOW_MS,
         .max_press_ms = CONFIG_APP_BUTTON_MAX_PRESS_MS,
-        .count = CONFIG_APP_BUTTON_PRESS_COUNT,
+        /* the largest configured gesture ends a sequence immediately, smaller ones after the window */
+        .max_count = CONFIG_APP_BUTTON_PRESS_COUNT > CONFIG_APP_BUTTON_PAIRING_PRESS_COUNT
+                         ? CONFIG_APP_BUTTON_PRESS_COUNT
+                         : CONFIG_APP_BUTTON_PAIRING_PRESS_COUNT,
     };
     press_detector_t det;
     press_detector_init(&det, &cfg);
@@ -57,10 +60,11 @@ static void task(void *arg)
         int64_t idle_since = 0;
         for (;;) {
             int64_t now = esp_timer_get_time() / 1000;
-            if (press_detector_feed(&det, read_pressed(), now)) {
-                ESP_LOGI(TAG, "%d short presses detected", CONFIG_APP_BUTTON_PRESS_COUNT);
+            uint8_t presses = press_detector_feed(&det, read_pressed(), now);
+            if (presses > 0) {
+                ESP_LOGI(TAG, "%u short press(es)", presses);
                 if (s_cb) {
-                    s_cb();
+                    s_cb(presses);
                 }
             }
             if (press_detector_busy(&det, now)) {
@@ -103,8 +107,9 @@ esp_err_t button_handler_start(button_sequence_cb_t on_sequence)
     }
     err = gpio_isr_handler_add(CONFIG_APP_BOOT_BUTTON_GPIO, button_isr, NULL);
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "GPIO%d: %d presses within %d ms open the configuration portal", CONFIG_APP_BOOT_BUTTON_GPIO,
-                 CONFIG_APP_BUTTON_PRESS_COUNT, CONFIG_APP_BUTTON_WINDOW_MS);
+        ESP_LOGI(TAG, "GPIO%d: %d presses = Matter pairing mode, %d presses = configuration portal (within %d ms)",
+                 CONFIG_APP_BOOT_BUTTON_GPIO, CONFIG_APP_BUTTON_PAIRING_PRESS_COUNT, CONFIG_APP_BUTTON_PRESS_COUNT,
+                 CONFIG_APP_BUTTON_WINDOW_MS);
     }
     return err;
 }

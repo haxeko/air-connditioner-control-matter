@@ -5,7 +5,6 @@
 
 #include "app_state.h"
 #include "config_store.h"
-#include "driver/gpio.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -62,15 +61,6 @@ static void set_job(wifi_job_state_t st, const char *msg)
     s_job = st;
     strlcpy(s_job_msg, msg ? msg : "", sizeof(s_job_msg));
     unlock();
-}
-
-static void status_led(bool on)
-{
-#if CONFIG_APP_STATUS_LED_GPIO >= 0
-    gpio_set_level(CONFIG_APP_STATUS_LED_GPIO, on ? 1 : 0);
-#else
-    (void)on;
-#endif
 }
 
 static const char *disconnect_hint(uint8_t reason)
@@ -232,11 +222,6 @@ esp_err_t wifi_config_early_init(void)
     }
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, event_handler, NULL));
-#if CONFIG_APP_STATUS_LED_GPIO >= 0
-    gpio_config_t io = { .pin_bit_mask = 1ULL << CONFIG_APP_STATUS_LED_GPIO, .mode = GPIO_MODE_OUTPUT };
-    gpio_config(&io);
-    status_led(false);
-#endif
     return ESP_OK;
 }
 
@@ -325,7 +310,6 @@ esp_err_t wifi_config_portal_open(void)
     }
     apply_ap_config();
     s_portal_open = true;
-    status_led(true);
     ESP_LOGI(TAG, "portal open: SSID %s, http://192.168.4.1 (closes after %d min idle)", s_ap_ssid,
              CONFIG_APP_AP_TIMEOUT_MIN);
     if (s_hook) {
@@ -348,7 +332,6 @@ esp_err_t wifi_config_portal_close(void)
     lock();
     s_ap_clients = 0;
     unlock();
-    status_led(false);
     ESP_LOGI(TAG, "portal closed");
     if (s_hook) {
         s_hook(false);
