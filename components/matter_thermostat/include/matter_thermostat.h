@@ -61,6 +61,10 @@ typedef struct {
     bool heat_feature;
     uint16_t vendor_id, product_id;
     uint16_t discriminator;
+    bool ble_commissioning;        /* built with CHIPoBLE: phones find the device over Bluetooth */
+    bool ble_advertising;          /* CHIPoBLE advertising right now (commissioning window open) */
+    char node_label[33];           /* Basic Information NodeLabel (may be renamed by a home app) */
+    char ble_name[17];             /* BLE GAP device name */
 } matter_status_t;
 
 typedef struct {

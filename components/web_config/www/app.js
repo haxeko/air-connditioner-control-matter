@@ -335,10 +335,19 @@
     box.replaceChildren(svg);
   }
 
+  function bleText(m) {
+    if (!m.ble) return 'không có (bản firmware này chỉ ghép qua Wi-Fi nhà)';
+    if (m.ble_advertising) return 'đang phát, tên ' + (m.ble_name || '-');
+    return 'sẵn sàng, chỉ phát khi bật chế độ ghép' + (m.ble_name ? ' (tên ' + m.ble_name + ')' : '');
+  }
+
   loaders.home = async (user) => {
     const j = await api('matter', null, user);
     const m = j.matter;
     text('hm-window', m.window_open ? 'Đang bật (LED nháy xanh dương)' : 'Tắt (nhấn BOOT 2 lần để bật)');
+    text('hm-ble', bleText(m));
+    text('hm-product', m.product_name || '-');
+    text('hm-nodelabel', m.node_label || '(trống)');
     text('hm-count', m.home_fabrics);
     const sel = $('hm-minutes');
     if (!sel.options.length) {
@@ -773,6 +782,7 @@
       ['NVS lệnh IR (mục dùng/tổng)', j.nvs_ir.used + ' / ' + j.nvs_ir.total],
     ]);
     kv('dg-matter', [
+      ['Tên thiết bị', m.product_name], ['NodeLabel', m.node_label || '(trống)'], ['Bluetooth', bleText(m)],
       ['Hệ sinh thái nhà', m.home_fabrics], ['Endpoint thermostat', m.endpoint], ['Tính năng Sưởi', m.heat ? 'có' : 'không'],
       ['VID / PID', hex(m.vendor_id) + ' / ' + hex(m.product_id)], ['Discriminator', m.discriminator],
       ['Fabric B', fb.ready ? 'sẵn sàng (fabric index ' + fb.fabric_index + ')' : 'lỗi: ' + (fb.init_error || 'chưa khởi tạo')],

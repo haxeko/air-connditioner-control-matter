@@ -29,7 +29,7 @@ function check(cond, what) {
   try {
     await page.goto(base);
     await page.waitForFunction(() => document.getElementById('ov-temp').textContent !== '--');
-    check((await txt('#dev-name')) === 'Máy lạnh IR', 'device name from /api/session');
+    check((await txt('#dev-name')) === 'May lanh IR v1.1.0', 'versioned device name from /api/session');
     check(await page.locator('#banner-test').isVisible(), 'test-mode banner shown');
     check((await txt('#ov-temp')) === 'Không khả dụng', 'no sensor -> temperature unavailable (not invented)');
     check((await txt('#portal-left')).startsWith('Tự tắt sau'), 'portal countdown');
@@ -59,8 +59,12 @@ function check(cond, what) {
     await page.click('#hm-show');
     await page.waitForSelector('#hm-qr svg path');
     check((await txt('#hm-manual')) === '3497-011-2332', 'manual code formatted');
+    check((await txt('#hm-product')) === 'May lanh IR v1.1.0', 'Matter product name with version suffix');
+    check((await txt('#hm-ble')).startsWith('sẵn sàng'), 'BLE ready while the window is closed');
     await page.click('#hm-open');
     await page.waitForFunction(() => document.getElementById('hm-window').textContent.startsWith('Đang bật'));
+    await page.waitForFunction(() => document.getElementById('hm-ble').textContent.includes('AC-1A2B-v1.1.0'));
+    check((await txt('#hm-ble')).startsWith('đang phát'), 'BLE advertising while the window is open');
     check((await page.locator('#hm-print').isVisible()), 'printable pairing label offered');
     check(true, 'commissioning window opened');
     await shot('03-home');

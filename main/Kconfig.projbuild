@@ -162,8 +162,11 @@ menu "AC Matter IR controller"
 
     menu "Configuration portal (SoftAP + web)"
         config APP_AP_SSID_PREFIX
-            string "SoftAP SSID prefix (MAC suffix appended)"
+            string "SoftAP SSID prefix (MAC suffix and \"-vX.Y.Z\" appended)"
             default "AC-Matter-"
+            help
+                The configuration Wi-Fi is named <prefix><last 2 MAC bytes>-v<firmware version>,
+                e.g. AC-Matter-1A2B-v1.1.0 (truncated to 32 characters if needed).
 
         config APP_AP_PASSWORD
             string "SoftAP password (8-63 characters, empty = random per device)"
@@ -231,8 +234,18 @@ menu "AC Matter IR controller"
             default 300
 
         config APP_DEVICE_NAME
-            string "Default node label"
+            string "Device name (the firmware version is appended: \"<name> vX.Y.Z\")"
             default "May lanh IR"
+            help
+                Published as Matter ProductName, default NodeLabel and DNS-SD commissionable name
+                (DN), each as "<name> v<firmware version>" (at most 32 bytes in total, checked at
+                build time). The version comes from PROJECT_VER in the top-level CMakeLists.txt.
+                A NodeLabel renamed in a home app is kept; the default label of an older firmware
+                is updated to the new version at boot.
+
+        config APP_VENDOR_NAME
+            string "Vendor name (Matter Basic Information VendorName)"
+            default "DIY"
     endmenu
 
     menu "Local wired temperature sensor (optional fallback)"

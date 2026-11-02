@@ -6,8 +6,15 @@
 #   connectedhomeip        b1902b39ac6734913ce5f4d2abf153693a50264b (bundled in esp_matter 1.6.1)
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VER "1.0.0")
-set(PROJECT_VER_NUMBER 1)
+# Firmware version: the only place to change it. It is the ESP-IDF app version, the Matter
+# SoftwareVersionString, and the "vX.Y.Z" suffix of every name the device publishes
+# (Matter product/node/commissionable name, BLE name, configuration Wi-Fi SSID).
+set(PROJECT_VER "1.1.0")
+# Matter SoftwareVersion (uint32, must grow with every release): MAJOR*10000 + MINOR*100 + PATCH.
+if(NOT PROJECT_VER MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
+    message(FATAL_ERROR "PROJECT_VER must be MAJOR.MINOR.PATCH, got '${PROJECT_VER}'")
+endif()
+math(EXPR PROJECT_VER_NUMBER "${CMAKE_MATCH_1} * 10000 + ${CMAKE_MATCH_2} * 100 + ${CMAKE_MATCH_3}")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
@@ -22,6 +29,11 @@ project(ac_matter_ir)
 idf_build_set_property(CXX_COMPILE_OPTIONS "-std=gnu++17;-Os;-DCHIP_HAVE_CONFIG_H" APPEND)
 idf_build_set_property(C_COMPILE_OPTIONS "-Os" APPEND)
 idf_build_set_property(COMPILE_OPTIONS "-Wno-format-nonliteral;-Wno-format-security" APPEND)
+# Version as a C string literal for names that CHIP needs at compile time (main/matter_project_config.h).
+# Same mechanism ESP-IDF uses for IDF_VER; PROJECT_VER is read back after a possible
+# CONFIG_APP_PROJECT_VER_FROM_CONFIG override so it always equals esp_app_get_description()->version.
+idf_build_get_property(app_fw_version PROJECT_VER)
+idf_build_set_property(COMPILE_DEFINITIONS "APP_FW_VERSION=\"${app_fw_version}\"" APPEND)
 
 # IPv4 strong host model (configuration portal only reachable from the SoftAP side), injected into
 # lwIP with the documented ESP-IDF mechanism for custom hooks (api-guides/lwip.rst "Customized lwIP Hooks").

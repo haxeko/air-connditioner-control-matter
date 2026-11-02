@@ -1,21 +1,49 @@
-# Firmware đã build sẵn (ESP32-S3, flash 16 MB)
+# Firmware đã build sẵn – v1.1.0 (ESP32-S3, flash 16 MB)
 
-Build với ESP-IDF v6.0.2 + esp_matter 1.6.1, cấu hình mặc định (`sdkconfig.defaults`).
+Build với ESP-IDF v6.0.2 + esp_matter 1.6.1, cấu hình mặc định (`sdkconfig.defaults`), phiên bản 1.1.0.
 
 | File | Địa chỉ | Dùng khi |
 |---|---|---|
 | `ac_matter_ir_full_0x0.bin` | `0x0` | Nạp lần đầu (bootloader + bảng phân vùng + otadata + app) |
-| `ac_matter_ir_app_0x40000.bin` | `0x40000` | Cập nhật app, giữ nguyên cấu hình/fabric/profile IR |
+| `ac_matter_ir_app_0x40000.bin` | `0x40000` | **Nâng cấp từ v1.0.0**: chỉ thay app, giữ Wi-Fi, mã ghép, fabric, cảm biến, profile IR |
+
+Nạp lần đầu (thay `COM5` bằng cổng của bo):
 
 ```bat
 python -m esptool --chip esp32s3 -p COM5 -b 460800 write-flash 0x0 ac_matter_ir_full_0x0.bin
 ```
 
+Nâng cấp bo đang chạy v1.0.0, giữ nguyên dữ liệu:
+
+```bat
+python -m esptool --chip esp32s3 -p COM5 -b 460800 write-flash 0x40000 ac_matter_ir_app_0x40000.bin
+```
+
+File full được đệm `0xFF` qua vùng NVS (`0x10000`–`0x2FFFF`), nên nạp nó sẽ **xóa** Wi-Fi, mã ghép (tạo
+mã mới), Fabric B và cảm biến đã ghép; profile IR ở phân vùng `irstore` (`0x840000`) vẫn còn.
+
 SHA-256:
-- `972bc8bdd11f2733631ea7b5e98b8693bf207ed28a61b5706950e97401428357`  ac_matter_ir_full_0x0.bin
-- `25a508c3b633bb7b967a5ad8c46b576d8fb7b54c895665d2990fad63998d2427`  ac_matter_ir_app_0x40000.bin
+- `8cffe5d4633bdba41b2e8cf51ba25b7dcaa6d756c25c8c61b7d981611d00d873`  ac_matter_ir_full_0x0.bin
+- `d56617348ca82f0e0a66a3ee431cf33b5d9c1f7312e7729e5ddd3f2d9c371a94`  ac_matter_ir_app_0x40000.bin
 
-Wi-Fi cấu hình: `AC-Matter-XXXX`, mật khẩu `69696969`.
+## Tên thiết bị (có hậu tố phiên bản)
 
-Nút BOOT: 2 lần = chế độ ghép Matter (LED RGB GPIO48 nháy xanh dương), 3 lần = Wi-Fi cấu hình
-(`http://192.168.4.1`). Mã QR / mã 11 số: trang "Nhà thông minh" hoặc lệnh `secrets` trên cổng serial.
+| Ở đâu | Tên |
+|---|---|
+| Ứng dụng nhà (Matter ProductName, NodeLabel, DNS-SD) | `May lanh IR v1.1.0` (hãng: `DIY`) |
+| Bluetooth | `AC-XXXX-v1.1.0` |
+| Wi-Fi cấu hình | `AC-Matter-XXXX-v1.1.0`, mật khẩu `69696969` |
+
+`XXXX` = 4 ký tự cuối địa chỉ MAC, giống nhau ở Bluetooth và Wi-Fi cấu hình.
+
+## Ghép vào ứng dụng nhà
+
+1. Nhấn **BOOT 2 lần** → LED RGB (GPIO48) nháy xanh dương 15 phút, ESP phát Bluetooth.
+2. Điện thoại: bật Bluetooth, ở Wi-Fi nhà **2,4 GHz** (không vào Wi-Fi cấu hình), đứng gần ESP.
+3. Google Home / Apple Home / SmartThings / Alexa / Home Assistant → *Thêm thiết bị → Matter* → quét QR
+   hoặc nhập mã 11 số. Ứng dụng gửi Wi-Fi nhà cho ESP qua Bluetooth (ESP chưa cần có Wi-Fi trước).
+
+Mã QR / mã 11 số: trang "Nhà thông minh" của Wi-Fi cấu hình (BOOT 3 lần, `http://192.168.4.1`) hoặc lệnh
+`secrets` trên cổng serial. Mã số không đổi so với v1.0.0; QR có thêm cờ Bluetooth nên nên in lại tem.
+
+Log khởi động phải có `device name: May lanh IR v1.1.0 (vendor DIY), firmware 1.1.0, BLE commissioning on`.

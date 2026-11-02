@@ -19,3 +19,24 @@
 
 /* Sessions the controller side may hold at the same time (sensor + commissioning target). */
 #define CHIP_CONFIG_CONTROLLER_MAX_ACTIVE_DEVICES 4
+
+/*
+ * Names published by the device, all carrying the firmware version suffix "vX.Y.Z":
+ *   - Basic Information VendorName / ProductName (read by every home app during commissioning),
+ *   - DNS-SD TXT "DN" of the commissionable-node advertisement (shown by some commissioners),
+ *   - default NodeLabel (matter_thermostat.cpp, from the same CONFIG_APP_DEVICE_NAME).
+ * APP_FW_VERSION is a string literal defined for every component by the top-level CMakeLists.txt
+ * (= PROJECT_VER = esp_app_get_description()->version). CHIP copies these with strcpy() into
+ * 33-byte buffers, so they must be string literals of at most 32 bytes (checked in
+ * matter_thermostat.cpp).
+ */
+#include "sdkconfig.h"
+
+#ifndef APP_FW_VERSION
+#error "APP_FW_VERSION must be defined by the top-level CMakeLists.txt"
+#endif
+
+#define CHIP_DEVICE_CONFIG_DEVICE_VENDOR_NAME CONFIG_APP_VENDOR_NAME
+#define CHIP_DEVICE_CONFIG_DEVICE_PRODUCT_NAME CONFIG_APP_DEVICE_NAME " v" APP_FW_VERSION
+#define CHIP_DEVICE_CONFIG_ENABLE_COMMISSIONABLE_DEVICE_NAME 1
+#define CHIP_DEVICE_CONFIG_DEVICE_NAME CONFIG_APP_DEVICE_NAME " v" APP_FW_VERSION

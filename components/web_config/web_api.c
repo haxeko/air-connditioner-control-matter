@@ -12,6 +12,7 @@
 
 #include "ac_profiles.h"
 #include "app_state.h"
+#include "app_version.h"
 #include "climate_control.h"
 #include "config_store.h"
 #include "esp_app_desc.h"
@@ -131,6 +132,11 @@ static void put_matter(wj_t *w)
     wj_uint(w, "vendor_id", m.vendor_id);
     wj_uint(w, "product_id", m.product_id);
     wj_uint(w, "discriminator", m.discriminator);
+    wj_bool(w, "ble", m.ble_commissioning);
+    wj_bool(w, "ble_advertising", m.ble_advertising);
+    wj_str(w, "ble_name", m.ble_name);
+    wj_str(w, "product_name", APP_DEVICE_FULL_NAME);
+    wj_str(w, "node_label", m.node_label);
     wj_obj_end(w);
 }
 
@@ -311,7 +317,7 @@ static bool restart_needed(void)
 static void get_session(api_ctx_t *c)
 {
     wj_str(c->w, "token", web_session_token());
-    wj_str(c->w, "device", CONFIG_APP_DEVICE_NAME);
+    wj_str(c->w, "device", APP_DEVICE_FULL_NAME);
     wj_str(c->w, "version", esp_app_get_description()->version);
     wj_bool(c->w, "test_mode", TEST_MODE);
 }

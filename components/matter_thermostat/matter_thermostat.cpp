@@ -15,8 +15,11 @@
 #include <setup_payload/OnboardingCodesUtil.h>
 
 #include "app_state.h"
+#include "app_version.h"
 #include "device_identity.h"
 #include "esp_log.h"
+#include "esp_mac.h"
+#include "esp_matter_mem.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "matter_commissioner.h"
@@ -24,6 +27,14 @@
 
 using namespace esp_matter;
 using namespace chip::app::Clusters;
+
+/* CHIP strcpy()s these into 33-byte buffers (Basic Information strings, DNS-SD "DN"). */
+static_assert(sizeof(CHIP_DEVICE_CONFIG_DEVICE_PRODUCT_NAME) <= 33,
+              "CONFIG_APP_DEVICE_NAME + \" vX.Y.Z\" must not exceed 32 bytes (Matter ProductName)");
+static_assert(sizeof(CHIP_DEVICE_CONFIG_DEVICE_NAME) <= 33, "commissionable device name (DN) exceeds 32 bytes");
+static_assert(sizeof(CHIP_DEVICE_CONFIG_DEVICE_VENDOR_NAME) <= 33, "CONFIG_APP_VENDOR_NAME exceeds 32 bytes");
+static_assert(sizeof(APP_DEVICE_FULL_NAME) <= sizeof(esp_matter::cluster::basic_information::config_t::node_label),
+              "default NodeLabel exceeds 32 bytes");
 
 namespace {
 
@@ -232,9 +243,93 @@ esp_err_t ReadInt16(uint32_t attributeId, int16_t & out)
     return err;
 }
 
+/* Empty, "<CONFIG_APP_DEVICE_NAME>" or "<CONFIG_APP_DEVICE_NAME> v<digits and dots>": never named, or
+ * named by this or an older firmware, as opposed to a name the user chose in a home app. */
+bool IsDefaultNodeLabel(const char * label)
+{
+    if (label[0] == 0) {
+        return true; /* CHIP's Basic Information cluster starts with an empty NodeLabel */
+    }
+    const size_t base = strlen(CONFIG_APP_DEVICE_NAME);
+    if (strncmp(label, CONFIG_APP_DEVICE_NAME, base) != 0) {
+        return false;
+    }
+    const char * rest = label + base;
+    if (*rest == 0) {
+        return true;
+    }
+    if (rest[0] != ' ' || rest[1] != 'v' || rest[2] == 0) {
+        return false;
+    }
+    for (rest += 2; *rest; rest++) {
+        if ((*rest < '0' || *rest > '9') && *rest != '.') {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* NodeLabel belongs to CHIP's code-driven Basic Information cluster (esp-matter 1.6 registers
+ * BasicInformationCluster on endpoint 0): it starts empty, is persisted by CHIP and the node_label of
+ * the esp-matter node config is not used for it. Give it the versioned device name when it is empty
+ * or still holds the default of an older firmware; a name chosen in a home app is kept. Reads and
+ * writes go through the data model provider (esp-matter routes them to the registered cluster). */
+void RefreshNodeLabel()
+{
+    constexpr uint32_t kCluster = BasicInformation::Id;
+    constexpr uint32_t kNodeLabel = BasicInformation::Attributes::NodeLabel::Id;
+    esp_matter_attr_val_t val = esp_matter_invalid(nullptr);
+    if (attribute::get_val(chip::kRootEndpointId, kCluster, kNodeLabel, &val) != ESP_OK) {
+        return;
+    }
+    char current[33] = { 0 };
+    if (val.type == ESP_MATTER_VAL_TYPE_CHAR_STRING && val.val.a.b != nullptr) {
+        size_t n = val.val.a.s < sizeof(current) - 1 ? val.val.a.s : sizeof(current) - 1;
+        memcpy(current, val.val.a.b, n);
+    }
+    if ((val.type == ESP_MATTER_VAL_TYPE_CHAR_STRING || val.type == ESP_MATTER_VAL_TYPE_LONG_CHAR_STRING) &&
+        val.val.a.b != nullptr) {
+        esp_matter_mem_free(val.val.a.b); /* get_val() hands over a copy of string values */
+    }
+    if (strcmp(current, APP_DEVICE_FULL_NAME) == 0 || !IsDefaultNodeLabel(current)) {
+        return;
+    }
+    char label[] = APP_DEVICE_FULL_NAME;
+    esp_matter_attr_val_t nv = esp_matter_char_str(label, static_cast<uint16_t>(strlen(label)));
+    if (attribute::update(chip::kRootEndpointId, kCluster, kNodeLabel, &nv) == ESP_OK) {
+        ESP_LOGI(TAG, "NodeLabel \"%s\" -> \"%s\"", current, label);
+    }
+}
+
+/* BLE GAP name "AC-1A2B-v1.1.0" (same MAC digits as the configuration Wi-Fi SSID). CHIP allows at
+ * most 15 characters; without the version it would not fit, the MAC digits are dropped first. */
+void SetBleName()
+{
+    uint8_t mac[6] = { 0 };
+    esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
+    char name[16];
+    int n = snprintf(name, sizeof(name), "AC-%02X%02X" APP_VERSION_SUFFIX, mac[4], mac[5]);
+    if (n < 0 || n >= static_cast<int>(sizeof(name))) {
+        n = snprintf(name, sizeof(name), "AC" APP_VERSION_SUFFIX);
+    }
+    if (n < 0 || n >= static_cast<int>(sizeof(name))) {
+        return; /* keep CHIP's standard "MATTER-<discriminator>" */
+    }
+    CHIP_ERROR err = chip::DeviceLayer::ConnectivityMgr().SetBLEDeviceName(name);
+    if (err == CHIP_NO_ERROR) {
+        ESP_LOGI(TAG, "BLE name: %s", name);
+    } else if (err != CHIP_ERROR_UNSUPPORTED_CHIP_FEATURE) {
+        ESP_LOGW(TAG, "SetBLEDeviceName: %s", err.AsString());
+    }
+}
+
 /* CHIP thread, right after server init. */
 void InitAfterServer(intptr_t)
 {
+    ESP_LOGI(TAG, "device name: %s (vendor %s), firmware %s, BLE commissioning %s", APP_DEVICE_FULL_NAME,
+             CHIP_DEVICE_CONFIG_DEVICE_VENDOR_NAME, APP_FW_VERSION, CHIP_DEVICE_CONFIG_ENABLE_CHIPOBLE ? "on" : "off");
+    SetBleName();
+    RefreshNodeLabel();
     if (matter_commissioner_init_on_chip_thread(&sServerParams) != ESP_OK) {
         ESP_LOGE(TAG, "Fabric B commissioner unavailable; thermostat keeps working");
     }
@@ -360,7 +455,7 @@ extern "C" esp_err_t matter_thermostat_create(const thermostat_caps_t * caps, th
     sUserCb = cb;
 
     node::config_t nodeConfig;
-    strlcpy(nodeConfig.root_node.basic_information.node_label, CONFIG_APP_DEVICE_NAME,
+    strlcpy(nodeConfig.root_node.basic_information.node_label, APP_DEVICE_FULL_NAME,
             sizeof(nodeConfig.root_node.basic_information.node_label));
     node_t * node = node::create(&nodeConfig, AttributeCallback, IdentifyCallback);
     if (node == nullptr) {
@@ -452,6 +547,7 @@ extern "C" esp_err_t matter_thermostat_start(void)
 extern "C" void matter_thermostat_get_status(matter_status_t * out)
 {
     memset(out, 0, sizeof(*out));
+    out->ble_commissioning = CHIP_DEVICE_CONFIG_ENABLE_CHIPOBLE;
     out->started = sStarted;
     out->endpoint_id = sEndpointId;
     out->heat_feature = sCaps.heat;
@@ -467,6 +563,20 @@ extern "C" void matter_thermostat_get_status(matter_status_t * out)
     LogErrorOnFailure(chip::DeviceLayer::GetDeviceInstanceInfoProvider()->GetVendorId(out->vendor_id));
     LogErrorOnFailure(chip::DeviceLayer::GetDeviceInstanceInfoProvider()->GetProductId(out->product_id));
     LogErrorOnFailure(app_identity::GetDeviceIdentity().GetSetupDiscriminator(out->discriminator));
+    out->ble_advertising = chip::DeviceLayer::ConnectivityMgr().IsBLEAdvertising();
+    if (chip::DeviceLayer::ConnectivityMgr().GetBLEDeviceName(out->ble_name, sizeof(out->ble_name)) != CHIP_NO_ERROR) {
+        out->ble_name[0] = 0;
+    }
+    esp_matter_attr_val_t val = esp_matter_invalid(nullptr);
+    if (attribute::get_val(chip::kRootEndpointId, BasicInformation::Id, BasicInformation::Attributes::NodeLabel::Id,
+                           &val) == ESP_OK &&
+        val.val.a.b != nullptr &&
+        (val.type == ESP_MATTER_VAL_TYPE_CHAR_STRING || val.type == ESP_MATTER_VAL_TYPE_LONG_CHAR_STRING)) {
+        size_t n = val.val.a.s < sizeof(out->node_label) - 1 ? val.val.a.s : sizeof(out->node_label) - 1;
+        memcpy(out->node_label, val.val.a.b, n);
+        out->node_label[n] = 0;
+        esp_matter_mem_free(val.val.a.b);
+    }
 }
 
 extern "C" void matter_thermostat_get_user_state(thermostat_user_state_t * out)
@@ -542,8 +652,12 @@ extern "C" esp_err_t matter_thermostat_get_onboarding(char * qr, size_t qr_len, 
     if (!sStarted || qr == nullptr || manual == nullptr || qr_len == 0 || manual_len == 0) {
         return ESP_ERR_INVALID_STATE;
     }
-    /* This device joins Wi-Fi through its own portal, so it is discoverable on the IP network only. */
+    /* Discoverable over Bluetooth LE (phone apps find it nearby and send the home Wi-Fi) and, once
+     * on Wi-Fi, over DNS-SD on the home network. The manual code does not carry these flags. */
     chip::RendezvousInformationFlags flags(chip::RendezvousInformationFlag::kOnNetwork);
+#if CHIP_DEVICE_CONFIG_ENABLE_CHIPOBLE
+    flags.Set(chip::RendezvousInformationFlag::kBLE);
+#endif
     lock::ScopedChipStackLock lock(portMAX_DELAY);
     chip::MutableCharSpan qrSpan(qr, qr_len);
     chip::MutableCharSpan manualSpan(manual, manual_len);

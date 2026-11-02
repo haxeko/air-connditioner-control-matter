@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "app_state.h"
+#include "app_version.h"
 #include "climate_control.h"
 #include "esp_console.h"
 #include "esp_log.h"
@@ -43,7 +44,7 @@ static int cmd_secrets(int argc, char **argv)
     char qr[48];
     char manual[24];
     if (matter_thermostat_get_onboarding(qr, sizeof(qr), manual, sizeof(manual)) == ESP_OK) {
-        printf("\nMatter onboarding (add the thermostat to Apple Home / Aqara / SmartThings)\n");
+        printf("\nMatter onboarding: add \"%s\" in Google Home / Apple Home / SmartThings / Alexa\n", APP_DEVICE_FULL_NAME);
         printf("  Manual code : %s\n", manual);
         printf("  QR payload  : %s\n", qr);
         esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
@@ -80,6 +81,7 @@ static int cmd_status(int argc, char **argv)
     (void)argv;
     wifi_status_t ws;
     wifi_config_get_status(&ws);
+    printf("Device  : %s (firmware %s)\n", APP_DEVICE_FULL_NAME, APP_FW_VERSION);
     printf("Wi-Fi   : %s %s %s\n", ws.sta_configured ? ws.sta_ssid : "(not configured)",
            ws.sta_connected ? "connected" : "not connected", ws.sta_ip4);
     printf("Portal  : %s, %u client(s)\n", ws.portal_open ? "open" : "closed", ws.ap_clients);
@@ -88,6 +90,9 @@ static int cmd_status(int argc, char **argv)
     matter_thermostat_get_status(&ms);
     printf("Matter  : %s, %u home fabric(s), window %s, commissioner %s\n", ms.started ? "started" : "stopped",
            ms.home_fabric_count, ms.window_open ? "open" : "closed", ms.commissioner_ready ? "ready" : "not ready");
+    printf("Name    : NodeLabel '%s'\n", ms.node_label);
+    printf("BLE     : %s%s%s\n", ms.ble_commissioning ? (ms.ble_advertising ? "advertising as " : "ready, name ") : "not built in",
+           ms.ble_commissioning ? ms.ble_name : "", ms.ble_commissioning && !ms.ble_advertising ? " (advertises in pairing mode)" : "");
 
     rt_status_t rs;
     remote_temperature_get_status(&rs);

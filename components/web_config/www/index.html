@@ -11,7 +11,7 @@
 <header class="top">
   <div class="brand">
     <span class="logo" aria-hidden="true">❄</span>
-    <div><h1 id="dev-name">Máy lạnh IR</h1><small id="dev-ver" class="muted"></small></div>
+    <div><h1 id="dev-name">May lanh IR</h1><small id="dev-ver" class="muted"></small></div>
   </div>
   <div class="top-actions">
     <span id="portal-left" class="muted"></span>
@@ -139,13 +139,16 @@
     <div class="card">
       <h2>Thêm thermostat vào ứng dụng nhà</h2>
       <ol class="steps">
-        <li>ESP phải kết nối Wi-Fi nhà (trang Wi-Fi) và điện thoại dùng cùng mạng nhà.</li>
+        <li>Trên điện thoại: bật <b>Bluetooth</b>, kết nối Wi-Fi nhà <b>2.4 GHz</b> (không dùng Wi-Fi cấu hình AC-Matter-…). ESP chưa cần vào Wi-Fi trước: ứng dụng gửi Wi-Fi nhà cho ESP qua Bluetooth. Nếu ESP đã vào Wi-Fi nhà thì ứng dụng cũng tìm thấy nó qua mạng.</li>
         <li>Bật chế độ ghép: <b>nhấn nút BOOT 2 lần</b> (đèn LED nháy xanh dương) hoặc bấm “Mở cửa sổ ghép” bên dưới. Thiết bị tự bật chế độ này khi chưa thuộc hệ sinh thái nào.</li>
-        <li>Trong Apple Home, Aqara Home, SmartThings…: Thêm thiết bị Matter, quét mã QR hoặc nhập mã số.</li>
+        <li>Trong Google Home, Apple Home, SmartThings, Alexa, Home Assistant…: Thêm thiết bị → Matter, quét mã QR hoặc nhập mã số. Thiết bị hiện với tên bên dưới.</li>
         <li>Ứng dụng sẽ báo “thiết bị chưa được chứng nhận” vì firmware dùng chứng thư thử nghiệm của SDK: chọn vẫn thêm.</li>
       </ol>
       <dl class="kv">
         <dt>Chế độ ghép (cửa sổ ghép)</dt><dd id="hm-window">-</dd>
+        <dt>Bluetooth</dt><dd id="hm-ble">-</dd>
+        <dt>Tên thiết bị (Matter)</dt><dd id="hm-product">-</dd>
+        <dt>Tên trong ứng dụng (NodeLabel)</dt><dd id="hm-nodelabel">-</dd>
         <dt>Số hệ sinh thái đã ghép</dt><dd id="hm-count">-</dd>
       </dl>
       <div class="row">

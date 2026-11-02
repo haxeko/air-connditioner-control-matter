@@ -17,6 +17,7 @@
 #include "ac_profiles.h"
 #include "app_console.h"
 #include "app_state.h"
+#include "app_version.h"
 #include "button_handler.h"
 #include "climate_control.h"
 #include "config_store.h"
@@ -62,11 +63,13 @@ static void on_temperature(bool valid, int16_t centi, temp_source_t source)
 /* Pairing mode: open the thermostat commissioning window (QR code / 11-digit code). */
 static void open_pairing_mode(void)
 {
+    matter_status_t ms;
+    matter_thermostat_get_status(&ms);
     wifi_status_t ws;
     wifi_config_get_status(&ws);
-    if (!ws.sta_connected)
+    if (!ws.sta_connected && !ms.ble_commissioning)
     {
-        /* on-network commissioning only: without the home Wi-Fi no app can find the device */
+        /* firmware built without BLE: on-network commissioning needs the home Wi-Fi */
         app_log_error("app", "pairing mode refused: not connected to the home Wi-Fi (BOOT x%d to configure it)",
                       CONFIG_APP_BUTTON_PRESS_COUNT);
         status_led_event(STATUS_LED_EVENT_ERROR);
@@ -79,8 +82,17 @@ static void open_pairing_mode(void)
         status_led_event(STATUS_LED_EVENT_ERROR);
         return;
     }
-    ESP_LOGI(TAG, "Matter pairing mode for %d s: add the thermostat with its QR code or 11-digit code",
-             CONFIG_APP_COMMISSIONING_WINDOW_S);
+    if (ms.ble_commissioning)
+    {
+        /* Over BLE the home app also hands over the Wi-Fi credentials (2.4 GHz network). */
+        ESP_LOGI(TAG, "Matter pairing mode for %d s (Bluetooth%s): add \"%s\" with its QR code or 11-digit code",
+                 CONFIG_APP_COMMISSIONING_WINDOW_S, ws.sta_connected ? " + home Wi-Fi" : "", APP_DEVICE_FULL_NAME);
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Matter pairing mode for %d s (home Wi-Fi): add \"%s\" with its QR code or 11-digit code",
+                 CONFIG_APP_COMMISSIONING_WINDOW_S, APP_DEVICE_FULL_NAME);
+    }
 }
 
 /* Button task context (never the ISR). */

@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "app_state.h"
+#include "app_version.h"
 #include "config_store.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -252,7 +253,9 @@ esp_err_t wifi_config_start(wifi_portal_hook_t hook)
     s_hook = hook;
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
-    snprintf(s_ap_ssid, sizeof(s_ap_ssid), "%s%02X%02X", CONFIG_APP_AP_SSID_PREFIX, mac[4], mac[5]);
+    /* "AC-Matter-1A2B-v1.1.0": the version suffix shows in the phone's Wi-Fi list which firmware runs
+     * (snprintf truncates to the 32-character SSID limit with a very long prefix). */
+    snprintf(s_ap_ssid, sizeof(s_ap_ssid), "%s%02X%02X" APP_VERSION_SUFFIX, CONFIG_APP_AP_SSID_PREFIX, mac[4], mac[5]);
 
     /* SoftAP password: 1) set by the user on the web page, 2) firmware default (Kconfig), 3) random per device */
     esp_err_t err = cfg_get_str(CFG_PART_MAIN, CFG_NS_APP, KEY_AP_PASS_USER, s_ap_password, sizeof(s_ap_password));

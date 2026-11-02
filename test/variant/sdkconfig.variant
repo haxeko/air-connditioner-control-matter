@@ -7,3 +7,5 @@ CONFIG_APP_STATUS_LED_SIMPLE=y
 CONFIG_APP_STATUS_LED_GPIO=2
 CONFIG_APP_IR_TX_INVERT=y
 CONFIG_APP_IR_RX_ACTIVE_LOW=n
+# Firmware without Bluetooth (on-network commissioning only): compiles the !CHIPoBLE code paths.
+CONFIG_BT_ENABLED=n

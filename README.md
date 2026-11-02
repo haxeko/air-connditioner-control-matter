@@ -3,15 +3,37 @@
 Firmware ESP-IDF thuần (không Arduino, không ESPHome, không Home Assistant/MQTT/RainMaker/cloud) cho
 ESP32-S3 N16R8:
 
-- xuất hiện trong Apple Home, Aqara Home, SmartThings… dưới dạng **Matter Thermostat** (Tắt/Làm lạnh,
-  Sưởi/Khô/Quạt chỉ khi profile máy lạnh đã học các chế độ đó);
+- xuất hiện trong Google Home, Apple Home, SmartThings, Alexa, Aqara Home, Home Assistant… dưới dạng
+  **Matter Thermostat** tên **`May lanh IR v1.1.0`** (Tắt/Làm lạnh, Sưởi/Khô/Quạt chỉ khi profile máy lạnh
+  đã học các chế độ đó);
 - tự tạo **fabric riêng (Fabric B)** để ghép cảm biến nhiệt độ Matter đã có trong nhà bằng Multi-Admin,
   rồi **subscribe** trực tiếp nhiệt độ của cảm biến (kể cả cảm biến Thread qua Border Router sẵn có);
 - điều khiển máy lạnh bằng **hồng ngoại học từ remote gốc** (RMT native của ESP-IDF);
-- **nhấn BOOT 2 lần** để vào **chế độ ghép Matter** (LED RGB nháy xanh dương), rồi thêm thiết bị bằng
-  **mã QR hoặc mã 11 số**;
+- **nhấn BOOT 2 lần** để vào **chế độ ghép Matter** (LED RGB nháy xanh dương): ứng dụng nhà tìm thấy
+  thiết bị **qua Bluetooth** (và qua Wi-Fi nhà nếu ESP đã vào mạng), thêm bằng **mã QR hoặc mã 11 số**;
+  ứng dụng tự gửi Wi-Fi nhà cho ESP qua Bluetooth;
 - **nhấn BOOT 3 lần** để mở Wi-Fi cấu hình và trang web tiếng Việt tại `http://192.168.4.1`;
-- lưu mọi cấu hình vào flash: mất điện không phải thiết lập lại.
+- lưu mọi cấu hình vào flash: mất điện không phải thiết lập lại;
+- mọi tên thiết bị phát ra đều có **hậu tố phiên bản firmware** (`v1.1.0`): tên Matter, tên Bluetooth
+  `AC-XXXX-v1.1.0`, Wi-Fi cấu hình `AC-Matter-XXXX-v1.1.0` – nhìn tên là biết thiết bị đang chạy bản nào.
+
+### Có gì mới trong v1.1.0
+
+- **Sửa lỗi “LED nháy xanh dương nhưng ứng dụng không thấy thiết bị”**: bản v1.0.0 không có Bluetooth,
+  chỉ quảng bá trên mạng IP (DNS-SD). Ứng dụng Matter tìm thiết bị mới chủ yếu qua Bluetooth, còn đường IP
+  chỉ chạy khi ESP đã vào đúng Wi-Fi nhà, điện thoại cùng mạng 2.4 GHz/không bị cách ly, và người dùng
+  quét mã. v1.1.0 bật **CHIPoBLE** (NimBLE): trong chế độ ghép ESP quảng bá đồng thời qua Bluetooth và
+  DNS-SD, QR có cờ BLE + mạng, BOOT x2 hoạt động cả khi ESP chưa có Wi-Fi (ứng dụng gửi Wi-Fi qua
+  Bluetooth). Quan trọng: esp-matter mặc định tắt hẳn Bluetooth khi bảng fabric không rỗng
+  (`CONFIG_USE_BLE_ONLY_FOR_COMMISSIONING`), mà Fabric B riêng của ESP luôn có mặt – nên tùy chọn này
+  được tắt, nếu không Bluetooth sẽ bị gỡ ngay khi khởi động.
+- **Đặt lại tên thiết bị có hậu tố phiên bản**: ProductName/NodeLabel/DNS-SD `DN` = `May lanh IR v1.1.0`,
+  VendorName `DIY` (v1.0.0 phát ra `TEST_PRODUCT`/`TEST_VENDOR` mặc định của SDK và NodeLabel trống), tên
+  Bluetooth `AC-XXXX-v1.1.0`, SSID cấu hình `AC-Matter-XXXX-v1.1.0`. Khi khởi động, NodeLabel trống hoặc còn
+  tên mặc định của bản cũ được đặt thành tên mới; tên đã đổi trong ứng dụng nhà được giữ nguyên.
+- Quảng bá DNS-SD có thêm `DT=769` (Thermostat). SoftwareVersion Matter = 10100.
+- Mã số 11 chữ số không đổi; nội dung QR đổi (thêm cờ Bluetooth) – tem QR in từ v1.0.0 vẫn dùng được
+  qua mạng Wi-Fi nhà, in lại tem để ứng dụng tìm qua Bluetooth.
 
 > Trạng thái: toàn bộ mã nguồn đã viết và **build thành công** cho ESP32-S3; logic thuần đã có
 > unit test chạy trên máy tính; giao diện web đã được kiểm thử tự động trong trình duyệt. Các phần cần
@@ -42,7 +64,8 @@ ESP32-S3 N16R8:
 ```mermaid
 flowchart LR
     subgraph Home["Hệ sinh thái nhà (Fabric A)"]
-        HUB["Apple Home / Aqara / SmartThings<br/>(hub, Thread Border Router)"]
+        HUB["Google Home / Apple Home / SmartThings<br/>(hub, Thread Border Router)"]
+        PHONE["Điện thoại (ứng dụng nhà)<br/>tìm qua Bluetooth hoặc DNS-SD"]
     end
     SENSOR["Cảm biến nhiệt độ Matter<br/>(Wi-Fi hoặc Thread)<br/>ở Fabric A và Fabric B"]
 
@@ -60,6 +83,7 @@ flowchart LR
         BTN["button_handler<br/>BOOT x2: ghép Matter / x3: cấu hình"]
     end
 
+    PHONE -- "ghép: BLE (CHIPoBLE, gửi Wi-Fi nhà) hoặc DNS-SD _matterc" --> SRV
     HUB -- "setpoint, SystemMode (Fabric A)" --> SRV
     SRV -- "LocalTemperature (null khi không hợp lệ)" --> HUB
     CMR -- "commissioning Multi-Admin (on-network)" --> SENSOR
@@ -161,8 +185,8 @@ Theo đúng mô hình “combined server/commissioner” của connectedhomeip
    sau tìm lại đúng fabric (`FindFabric(rootPubKey, fabricId)`) và dùng lại `fabricIndex` – **không tạo
    fabric mới sau mỗi lần reboot**. Fabric B có nhãn “ESP AC sensor link” và không được tính là “hệ sinh thái
    nhà” (cửa sổ ghép thermostat tự mở khi chưa có fabric nhà nào).
-5. Commissioning cảm biến: `PairDevice(..., DiscoveryType::kDiscoveryNetworkOnly)` (chỉ on-network,
-   BLE tắt), xác thực thiết bị bằng **75 PAA production** nhúng sẵn (bản sao DCL trong connectedhomeip,
+5. Commissioning cảm biến: `PairDevice(..., DiscoveryType::kDiscoveryNetworkOnly)` (chỉ on-network:
+   cảm biến đã ở trong mạng nhà; Bluetooth của ESP chỉ dùng ở vai trò thiết bị được ghép), xác thực thiết bị bằng **75 PAA production** nhúng sẵn (bản sao DCL trong connectedhomeip,
    nguồn và SHA-256 ở `components/matter_commissioner/paa/README.md`) – không cần Internet. Thiết bị không
    có đồng hồ thời gian thực tin cậy (không SNTP/Internet theo thiết kế), nên giống bản build ESP32 của
    connectedhomeip (`src/credentials/BUILD.gn`) và các bản controller của esp_matter, kiểm tra “DAC còn hiệu
@@ -246,6 +270,19 @@ idf.py build
 Lần build đầu, component manager tải `esp_matter 1.6.1` và các phụ thuộc đúng như `dependencies.lock`
 (cần Internet; các lần sau không cần). Build toàn bộ connectedhomeip mất khá lâu (10–30 phút).
 
+Nâng cấp thư mục đã build bản cũ (v1.0.0 không có Bluetooth): xóa `sdkconfig` để áp dụng
+`sdkconfig.defaults` mới, rồi build lại (`idf.py set-target esp32s3` cũng tạo lại `sdkconfig`):
+
+```bat
+del sdkconfig
+```
+
+```bat
+idf.py build
+```
+
+Log khởi động phải có `BLE commissioning on`; nếu thấy `off` là `sdkconfig` cũ vẫn còn.
+
 Nạp và xem log (thay `COM5` bằng cổng của bo; với cổng USB native của S3 thường là cổng “USB JTAG/serial”):
 
 ```bat
@@ -279,7 +316,8 @@ Playwright): `node test/web/ui_test.js http://127.0.0.1:8080/`.
 
 ### Bước 1 – Wi-Fi cấu hình và mật khẩu
 
-Mỗi thiết bị phát Wi-Fi cấu hình có SSID riêng `AC-Matter-XXXX` (4 ký tự cuối MAC). Mật khẩu mặc định
+Mỗi thiết bị phát Wi-Fi cấu hình có SSID riêng `AC-Matter-XXXX-v1.1.0` (4 ký tự cuối MAC + phiên bản
+firmware). Mật khẩu mặc định
 (cố định, đặt bằng `CONFIG_APP_AP_PASSWORD` trong `sdkconfig.defaults`) là:
 
 ```
@@ -298,9 +336,12 @@ dùng và mã ghép Matter (kèm QR vẽ bằng ký tự). Các lệnh khác: `s
 
 ### Bước 2 – Kết nối Wi-Fi nhà
 
+> Có thể **bỏ qua bước này**: khi ghép bằng ứng dụng nhà qua Bluetooth (bước 3), ứng dụng tự gửi Wi-Fi nhà
+> cho ESP. Trang cấu hình vẫn cần để học lệnh IR và ghép cảm biến.
+
 1. Lần đầu (chưa có Wi-Fi) thiết bị tự phát Wi-Fi cấu hình. Các lần sau: **nhấn BOOT 3 lần nhanh** (trong
    1,5 s). 1–2 lần nhấn không làm gì; nhấn khi đang mở chỉ gia hạn thời gian.
-2. Điện thoại kết nối `AC-Matter-XXXX`. Nếu điện thoại báo “không có Internet”, chọn **giữ kết nối**.
+2. Điện thoại kết nối `AC-Matter-XXXX-v1.1.0`. Nếu điện thoại báo “không có Internet”, chọn **giữ kết nối**.
 3. Mở `http://192.168.4.1` → tab **Wi-Fi** → *Quét mạng* → chọn mạng 2,4 GHz → nhập mật khẩu → **Lưu**.
 4. Chờ “Đã kết nối mạng mới”. Nếu sai mật khẩu, sau 40 s thiết bị tự quay lại mạng cũ (nếu có).
 
@@ -313,15 +354,30 @@ biến không bị gián đoạn.
    để in tem dán lên thiết bị), hoặc lệnh `secrets` trên cổng serial. Mã là cố định cho từng thiết bị (tạo
    ngẫu nhiên ở lần khởi động đầu, lưu NVS).
 2. Bật **chế độ ghép**: **nhấn nút BOOT 2 lần** (trong 1,5 s) → LED **nháy xanh dương** trong suốt thời gian
-   cho phép ghép (15 phút). Thiết bị phải đã kết nối Wi-Fi nhà; nếu chưa, LED nháy đỏ 3 lần và không mở chế độ
-   ghép. Khi thiết bị chưa thuộc hệ sinh thái nào, chế độ ghép tự bật 15 phút sau mỗi lần khởi động. Cũng có
-   thể bật bằng nút *Mở cửa sổ ghép* trên web hoặc lệnh `pairing`.
-3. Điện thoại ở cùng mạng Wi-Fi nhà. Trong Apple Home / Aqara Home / SmartThings: thêm thiết bị Matter, quét
-   QR hoặc nhập mã số. Ghép xong, LED sáng xanh lá 2 s rồi tắt.
-3. Firmware dùng **chứng thư thiết bị thử nghiệm của SDK** (VID 0xFFF1): ứng dụng sẽ cảnh báo “thiết bị
+   cho phép ghép (15 phút). Trong thời gian này ESP **phát Bluetooth** (tên `AC-XXXX-v1.1.0`) và, nếu đã vào
+   Wi-Fi nhà, quảng bá DNS-SD `_matterc._udp` (tên `May lanh IR v1.1.0`). ESP chưa có Wi-Fi vẫn ghép được qua
+   Bluetooth. Khi thiết bị chưa thuộc hệ sinh thái nào, chế độ ghép tự bật 15 phút sau mỗi lần khởi động. Cũng
+   có thể bật bằng nút *Mở cửa sổ ghép* trên web hoặc lệnh `pairing`.
+3. Trên điện thoại: **bật Bluetooth**, kết nối **Wi-Fi nhà 2,4 GHz** (ESP32 không dùng được 5 GHz; **không**
+   kết nối Wi-Fi cấu hình `AC-Matter-…` khi ghép), đứng gần thiết bị. Trong Google Home / Apple Home /
+   SmartThings / Alexa / Home Assistant: *Thêm thiết bị → Matter*, quét QR hoặc nhập mã số. Ứng dụng gửi
+   Wi-Fi nhà qua Bluetooth, ESP vào mạng và ứng dụng hoàn tất qua Wi-Fi. Ghép xong, LED sáng xanh lá 2 s rồi
+   tắt; thiết bị hiện tên `May lanh IR v1.1.0` (đổi tên trong ứng dụng thì tên mới được giữ).
+4. Firmware dùng **chứng thư thiết bị thử nghiệm của SDK** (VID 0xFFF1): ứng dụng sẽ cảnh báo “thiết bị
    chưa được chứng nhận” – chọn vẫn thêm. Một số ứng dụng cần bật chế độ nhà phát triển/thiết bị thử nghiệm.
-4. Muốn thêm vào hệ sinh thái thứ hai: dùng chức năng chia sẻ (Multi-Admin) của hệ sinh thái thứ nhất, hoặc
+5. Muốn thêm vào hệ sinh thái thứ hai: dùng chức năng chia sẻ (Multi-Admin) của hệ sinh thái thứ nhất, hoặc
    nhấn BOOT 2 lần rồi dùng lại mã QR/mã số của thiết bị.
+
+**Ứng dụng vẫn không thấy thiết bị?** Kiểm tra theo thứ tự:
+
+| Dấu hiệu | Cách xử lý |
+|---|---|
+| LED không nháy xanh dương | Chế độ ghép chưa bật hoặc đã hết 15 phút: nhấn BOOT 2 lần. Log phải có `pairing mode: commissioning window opened` và `CHIPoBLE advertising started`. |
+| Log có `BLE commissioning off` | Đang chạy firmware/`sdkconfig` cũ không có Bluetooth: nạp `firmware/ac_matter_ir_app_0x40000.bin` ở `0x40000` (giữ dữ liệu, xem `firmware/README.md`), hoặc khi tự build thì **xóa file `sdkconfig`** rồi build lại (giá trị cũ trong `sdkconfig` được ưu tiên hơn `sdkconfig.defaults`). |
+| Ứng dụng tìm mãi rồi báo lỗi | Bật Bluetooth + vị trí (Android cần quyền vị trí/thiết bị lân cận cho ứng dụng nhà), đứng gần ESP, tắt rồi bật lại chế độ ghép. Dùng mã QR/mã số của **chính** thiết bị (tab *Nhà thông minh* hoặc lệnh `secrets`). |
+| Ghép qua Bluetooth xong nhưng kẹt ở “đang kết nối mạng” | Wi-Fi nhà phải 2,4 GHz (hoặc mạng gộp 2,4/5 GHz), mật khẩu WPA2, router không bật cách ly thiết bị (AP/client isolation) giữa điện thoại và ESP. |
+| Ghép qua mạng (không Bluetooth) | ESP phải đã vào Wi-Fi nhà (tab Wi-Fi), điện thoại cùng mạng đó, không ở Wi-Fi khách; router phải chuyển multicast mDNS (tắt “IGMP snooping”/“multicast to unicast” nếu ứng dụng không tìm thấy). |
+| Ứng dụng báo thiết bị chưa chứng nhận / bị chặn | Chọn vẫn thêm. Google Home cần tạo dự án Matter thử nghiệm với VID 0xFFF1/PID 0x8000 trong Google Home Developer Console; SmartThings/Alexa có thể yêu cầu chế độ nhà phát triển. |
 
 ### Bước 4 – Học lệnh IR và khóa profile
 
@@ -436,6 +492,8 @@ học IR hoặc thử Wi-Fi mới).
 - CSP chặt (`script-src 'self'`, không inline script), `X-Frame-Options: DENY`, không cache.
 - Không log mật khẩu Wi-Fi, mật khẩu AP, mã chia sẻ, passcode hay khóa riêng; mã ghép chỉ hiện theo yêu cầu
   trên web hoặc lệnh console `secrets`. Bộ đệm chứa mật khẩu/mã được xóa sau khi dùng.
+- Bluetooth chỉ phát khi cửa sổ ghép đang mở (BOOT x2, web, hoặc khi chưa thuộc hệ sinh thái nào) và chỉ
+  có dịch vụ CHIPoBLE của Matter: muốn ghép phải có passcode trong QR/mã số (PASE), giống ghép qua mạng.
 - Chứng thư thiết bị là **chứng thư thử nghiệm** của SDK (xem giới hạn).
 
 ---
@@ -444,8 +502,9 @@ học IR hoặc thử Wi-Fi mới).
 
 ### 9.1 Đã build
 
-- Toàn bộ firmware build sạch cho `esp32s3` với IDF v6.0.2 + esp_matter 1.6.1 (cờ cảnh báo mặc định của
-  IDF, cảnh báo bị coi là lỗi): ảnh 1,66 MB (khe OTA 4 MB), DIRAM tĩnh 38,5 %.
+- Toàn bộ firmware v1.1.0 build sạch cho `esp32s3` với IDF v6.0.2 + esp_matter 1.6.1 (cờ cảnh báo mặc định
+  của IDF, cảnh báo bị coi là lỗi), có Bluetooth (NimBLE + CHIPoBLE): ảnh 1,89 MB (khe OTA 4 MB, còn trống
+  55 %), DIRAM tĩnh 45,7 %. Biến thể không Bluetooth (`test/variant/sdkconfig.variant`) cũng build được.
 - Mốc 1: server + commissioner Fabric B trên cùng CHIP stack build và link thành công.
 
 ### 9.2 Đã thử (không cần phần cứng)
@@ -466,7 +525,8 @@ học IR hoặc thử Wi-Fi mới).
 | 1. Khởi động server + commissioner trên S3 thật (log “commissioner ready”) | Đã build; cần chạy trên bo |
 | 2. Ghép cảm biến thật bằng Multi-Admin, đọc và subscribe | Đã cài đặt; cần cảm biến + hub |
 | 3. Reboot/mất điện: tự subscribe lại, không cần ghép lại; fabric và profile còn nguyên | Đã cài đặt (NVS); cần thiết bị |
-| 4. Thêm thermostat vào Apple Home/Aqara/SmartThings, cập nhật nhiệt độ, nhận setpoint | Đã cài đặt; cần hub |
+| 4. Thêm thermostat vào Google Home/Apple Home/SmartThings, cập nhật nhiệt độ, nhận setpoint | Đã cài đặt; cần hub |
+| 4b. Ghép qua Bluetooth (CHIPoBLE) khi ESP chưa có Wi-Fi và khi đã có Wi-Fi; Bluetooth còn hoạt động sau khi đã có Fabric A/B | Đã build và đối chiếu mã esp-matter/CHIP; cần điện thoại + bo |
 | 5. BOOT × 2 / × 3 trên GPIO0 thật, LED RGB, AP+STA, web trên điện thoại | Logic + UI đã thử; cần bo + điện thoại |
 | 6. Thu/phát IR với remote và máy lạnh thật | Đã cài đặt; cần mạch IR + máy lạnh |
 | 7. Thuật toán trên phòng thật; mất cảm biến không phát lệnh sai | Logic đã thử; cần phần cứng |
@@ -481,12 +541,17 @@ bị tắt – khi đó không còn đường IPv6 tới mạng Thread.
 
 Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng thái.
 
-1. **Khởi động hai vai trò** – log có `thermostat endpoint 1 …` và
-   `commissioner ready: fabric index …, fabric 0x…, node 0x… (created)`; lần khởi động sau là `(restored)`
-   với cùng fabric ID (không tạo fabric mới).
-2. **BOOT** – nhấn 1 lần: không có gì. Nhấn 2 lần: sau ~1,5 s log `BOOT x2: Matter pairing mode` và
-   `pairing mode: commissioning window opened`, LED nháy xanh dương; hết 15 phút hoặc ghép xong thì LED tắt.
-   Nhấn 3 lần trong 1,5 s: log `portal open: SSID AC-Matter-XXXX`, LED xanh lá. Nhấn 3 lần lần nữa:
+1. **Khởi động hai vai trò** – log có `App "ac_matter_ir" version: 1.1.0`, `thermostat endpoint 1 …`,
+   `device name: May lanh IR v1.1.0 (vendor DIY), firmware 1.1.0, BLE commissioning on`,
+   `BLE name: AC-XXXX-v1.1.0` và `commissioner ready: fabric index …, fabric 0x…, node 0x… (created)`; lần
+   khởi động sau là `(restored)` với cùng fabric ID (không tạo fabric mới).
+1b. **Tìm thấy qua Bluetooth** – nhấn BOOT 2 lần; ứng dụng nRF Connect (hoặc ứng dụng nhà) thấy thiết bị
+   `AC-XXXX-v1.1.0` với dịch vụ `0xFFF6`. Thêm vào ứng dụng nhà bằng QR khi ESP **chưa** có Wi-Fi: ứng dụng
+   gửi Wi-Fi, log `Disconnecting WiFi station interface`/`IP_EVENT_STA_GOT_IP` rồi `added to a home ecosystem`.
+2. **BOOT** – nhấn 1 lần: không có gì. Nhấn 2 lần: sau ~1,5 s log `BOOT x2: Matter pairing mode`,
+   `pairing mode: commissioning window opened` và `CHIPoBLE advertising started`, LED nháy xanh dương; hết 15
+   phút hoặc ghép xong thì LED tắt. Nhấn 3 lần trong 1,5 s: log `portal open: SSID AC-Matter-XXXX-v1.1.0`,
+   LED xanh lá. Nhấn 3 lần lần nữa:
    `portal already open: lifetime extended`. Giữ nút lâu: không có gì xảy ra (không factory reset).
 3. **Ghép cảm biến** – theo bước 5; trang Cảm biến hiển thị endpoint và giá trị đọc thử; sau khi Lưu, trạng
    thái “Đã subscribe”, log `subscription … established: interval a..b s, stale after c s`.
@@ -518,7 +583,10 @@ Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng
 - Thay đổi giới hạn/chế độ của profile chỉ áp dụng cho Matter sau khi khởi động lại (cấu trúc endpoint được
   tạo lúc khởi động).
 - Cảm biến ICD dạng LIT (ngủ rất lâu, cần check-in) chưa được xử lý riêng; cảm biến SIT/thường được hỗ trợ.
-- Cửa sổ ghép cơ bản tối đa 15 phút (giới hạn của chuẩn); hết thời gian thì mở lại trên web.
+- Cửa sổ ghép cơ bản tối đa 15 phút (giới hạn của chuẩn); hết thời gian thì nhấn BOOT 2 lần hoặc mở lại trên web.
+- Bluetooth chỉ dùng để được ghép (CHIPoBLE peripheral); ESP không ghép cảm biến qua Bluetooth (cảm biến
+  phải đã ở mạng nhà). Bluetooth luôn khởi tạo (≈ vài chục KB RAM) để BOOT x2 dùng được bất kỳ lúc nào, nhưng
+  chỉ phát sóng khi cửa sổ ghép mở.
 - Chỉ Wi-Fi 2,4 GHz; khi STA ở kênh khác, SoftAP theo kênh của STA (giới hạn phần cứng một radio).
 - Khi đang học IR, lệnh phát bị hoãn tới khi học xong (tránh tự thu tín hiệu của mình).
 
@@ -535,9 +603,22 @@ Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng
 | IR | `APP_IR_CARRIER_HZ` (38000), `APP_IR_CARRIER_DUTY_PERCENT` (33), `APP_IR_RX_IDLE_US` (12000), `APP_IR_RX_GLITCH_NS` (2500), `APP_IR_LEARN_END_GAP_MS` (400), `APP_IR_LEARN_TIMEOUT_S` (20), `APP_IR_MAX_LEVELS` (2048), `APP_IR_MAX_SEGMENTS` (16), `APP_IR_TX_MIN_GAP_MS` (600), `APP_IR_TX_DUPLICATE_WINDOW_MS` (1500) |
 | Nút BOOT | `APP_BUTTON_DEBOUNCE_MS` (40, 30–50), `APP_BUTTON_PAIRING_PRESS_COUNT` (2, chế độ ghép), `APP_BUTTON_PRESS_COUNT` (3, cấu hình), `APP_BUTTON_WINDOW_MS` (1500), `APP_BUTTON_MAX_PRESS_MS` (700) |
 | Cổng cấu hình | `APP_AP_SSID_PREFIX` ("AC-Matter-"), `APP_AP_PASSWORD` ("69696969"; rỗng = ngẫu nhiên từng thiết bị), `APP_AP_TIMEOUT_MIN` (10), `APP_AP_CHANNEL` (6), `APP_AP_MAX_CONN` (2), `APP_WIFI_CONNECT_TIMEOUT_S` (40) |
-| Matter | `APP_COMMISSIONER_UDP_PORT` (5542), `APP_COMMISSIONING_WINDOW_S` (900), `APP_SENSOR_MIN_INTERVAL_S` (30), `APP_SENSOR_MAX_INTERVAL_S` (600), `APP_SENSOR_RETRY_MIN_S` (5), `APP_SENSOR_RETRY_MAX_S` (300), `APP_DEVICE_NAME` |
+| Matter | `APP_COMMISSIONER_UDP_PORT` (5542), `APP_COMMISSIONING_WINDOW_S` (900), `APP_SENSOR_MIN_INTERVAL_S` (30), `APP_SENSOR_MAX_INTERVAL_S` (600), `APP_SENSOR_RETRY_MIN_S` (5), `APP_SENSOR_RETRY_MAX_S` (300), `APP_DEVICE_NAME` ("May lanh IR", luôn thêm " v<phiên bản>", tổng ≤ 32 byte – kiểm tra lúc build), `APP_VENDOR_NAME` ("DIY") |
 | Cảm biến cục bộ | `APP_LOCAL_SENSOR_NONE/SHT4X/SHT3X`, `..._SDA_GPIO` (8), `..._SCL_GPIO` (9), `..._PERIOD_S` (60) |
 | Thử nghiệm | `APP_TEST_SIMULATED_SENSOR` (**n**) – nguồn nhiệt độ giả lập, chỉ để thử trên bàn, hiển thị rõ “GIẢ LẬP” |
+
+**Phiên bản firmware** chỉ đặt một chỗ: `set(PROJECT_VER "1.1.0")` trong `CMakeLists.txt` gốc. Từ đó sinh
+ra phiên bản ứng dụng ESP-IDF, `SoftwareVersionString` Matter, `SoftwareVersion` = MAJOR·10000 + MINOR·100 +
+PATCH (10100) và hậu tố `v1.1.0` của mọi tên (macro `APP_FW_VERSION`, `components/app_state/include/app_version.h`,
+`main/matter_project_config.h`).
+
+**Bluetooth** (`sdkconfig.defaults`): `CONFIG_BT_ENABLED`, `CONFIG_BT_NIMBLE_ENABLED`, `CONFIG_ENABLE_CHIPOBLE`
+= y; `CONFIG_USE_BLE_ONLY_FOR_COMMISSIONING` = **n** (bắt buộc, vì Fabric B luôn có trong bảng fabric);
+NimBLE chỉ vai trò peripheral, 1 kết nối, bộ nhớ host ở PSRAM. Build không Bluetooth (`CONFIG_BT_ENABLED=n`,
+xem `test/variant/sdkconfig.variant`) vẫn chạy, chỉ ghép qua Wi-Fi nhà.
+
+> Khi đổi `sdkconfig.defaults` (ví dụ nâng cấp từ v1.0.0), **xóa file `sdkconfig`** trước khi build: ESP-IDF
+> ưu tiên giá trị đã có trong `sdkconfig` (v1.0.0 có `CONFIG_BT_ENABLED` tắt).
 
 Bảng phân vùng (`partitions.csv`): `nvs` 128 KB (Wi-Fi, Matter, cấu hình), `ota_0`/`ota_1` 4 MB, `irstore`
 512 KB (lệnh IR), `fctry` 24 KB (dành cho dữ liệu nhà máy).

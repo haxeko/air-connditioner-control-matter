@@ -42,6 +42,11 @@ CONFIG_EXAMPLE_DAC_PROVIDER=y
 # Commissioning window is opened by the application (only when no home fabric exists).
 CONFIG_CHIP_ENABLE_PAIRING_AUTOSTART=n
 
+# DNS-SD commissionable advertisement: "DN" (device name with version, matter_project_config.h)
+# and "DT" = Thermostat (0x0301) so commissioners can show what they found.
+CONFIG_ENABLE_COMMISSIONABLE_DEVICE_TYPE=y
+CONFIG_DEVICE_TYPE=769
+
 CONFIG_MAX_FABRICS=6
 CONFIG_MAX_EXCHANGE_CONTEXTS=16
 CONFIG_MAX_UNSOLICITED_MESSAGE_HANDLERS=10
@@ -54,8 +59,30 @@ CONFIG_ESP_MATTER_NVS_USE_COMPACT_ATTR_STORAGE=y
 CONFIG_WIFI_STATION_RECONNECT_INTERVAL=5000
 CONFIG_MBEDTLS_HKDF_C=y
 
-# No BLE: the device joins Wi-Fi via the SoftAP web UI and is commissioned on-network.
-CONFIG_BT_ENABLED=n
+# ---------------------------------------------------------------------------
+# Bluetooth LE commissioning (CHIPoBLE, NimBLE peripheral only). Phone apps (Google Home,
+# Apple Home, SmartThings, Alexa, Home Assistant) look for new Matter devices over BLE and hand
+# them the home Wi-Fi credentials; on-network (DNS-SD) commissioning keeps working as well.
+# ---------------------------------------------------------------------------
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_ENABLE_CHIPOBLE=y
+# Keep BLE alive after commissioning: Fabric B (this device's own commissioner fabric) is always
+# in the fabric table, and with the default (y) esp-matter would shut BLE down at every boot, so
+# BOOT x2 could never advertise again.
+CONFIG_USE_BLE_ONLY_FOR_COMMISSIONING=n
+# Advertising only while a commissioning window is open (BOOT x2 / first boot / web page).
+CONFIG_CHIPOBLE_ENABLE_ADVERTISING_AUTOSTART=0
+# Peripheral + broadcaster are all CHIPoBLE needs (the sensor is paired on-network, never over BLE).
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_ENABLE_CONN_REATTEMPT=n
+# Legacy advertising: what every commissioner scans for.
+CONFIG_BT_NIMBLE_EXT_ADV=n
+# NimBLE host buffers in PSRAM: internal RAM stays for Wi-Fi, lwIP and the BLE controller.
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=5120
 
 # ---------------------------------------------------------------------------
 # IPv6 for Matter-over-Thread sensors behind an existing Thread Border Router
