@@ -5,7 +5,7 @@ Build với ESP-IDF v6.0.2 + esp_matter 1.6.1, cấu hình mặc định (`sdkco
 | File | Địa chỉ | Dùng khi |
 |---|---|---|
 | `ac_matter_ir_full_0x0.bin` | `0x0` | Nạp lần đầu (bootloader + bảng phân vùng + otadata + app) |
-| `ac_matter_ir_app_0x40000.bin` | `0x40000` | **Nâng cấp từ v1.0.0**: chỉ thay app, giữ Wi-Fi, mã ghép, fabric, cảm biến, profile IR |
+| `ac_matter_ir_app_0x40000.bin` | `0x40000` | **Nâng cấp từ v1.0.0 hoặc v1.1.0**: chỉ thay app, giữ Wi-Fi, mã ghép, fabric, cảm biến, profile IR |
 
 Nạp lần đầu (thay `COM5` bằng cổng của bo):
 
@@ -13,7 +13,7 @@ Nạp lần đầu (thay `COM5` bằng cổng của bo):
 python -m esptool --chip esp32s3 -p COM5 -b 460800 write-flash 0x0 ac_matter_ir_full_0x0.bin
 ```
 
-Nâng cấp bo đang chạy v1.0.0, giữ nguyên dữ liệu:
+Nâng cấp bo đang chạy v1.0.0 hoặc v1.1.0, giữ nguyên dữ liệu:
 
 ```bat
 python -m esptool --chip esp32s3 -p COM5 -b 460800 write-flash 0x40000 ac_matter_ir_app_0x40000.bin
