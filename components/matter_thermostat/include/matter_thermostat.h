@@ -36,6 +36,8 @@ typedef struct {
     bool fan_only;
     int16_t cool_min, cool_max; /* 0.01 degC */
     int16_t heat_min, heat_max; /* 0.01 degC, ignored when !heat */
+    uint16_t fan_levels;        /* learned fan speeds (1 << ac_fan_t, AUTO excluded): Fan Control speeds */
+    bool swing;                 /* swing learned: Fan Control Rocking feature */
 } thermostat_caps_t;
 
 typedef struct {
@@ -83,6 +85,17 @@ typedef enum {
 /** Called on the CHIP thread; must not block. Register before matter_thermostat_start(). */
 typedef void (*matter_ui_event_cb_t)(matter_ui_event_t ev);
 void matter_thermostat_set_ui_callback(matter_ui_event_cb_t cb);
+
+/*
+ * Fan of the AC (Matter Fan Control cluster on the thermostat endpoint): speed (learned fan levels),
+ * Auto and swing (Rocking). Values are ac_fan_t / ac_swing_t (ac_types.h).
+ * The callback runs on the CHIP thread when a home app changes the fan; it must not block.
+ */
+typedef void (*thermostat_fan_change_cb_t)(uint8_t fan, uint8_t swing);
+void matter_thermostat_set_fan_callback(thermostat_fan_change_cb_t cb);
+
+/** Fan/swing chosen on the web page or restored at boot: shown in the home apps, then passed to the callback. */
+esp_err_t matter_thermostat_set_fan(uint8_t fan, uint8_t swing);
 
 /** Create node + thermostat endpoint. Call once before matter_thermostat_start(). */
 esp_err_t matter_thermostat_create(const thermostat_caps_t *caps, thermostat_user_change_cb_t cb);

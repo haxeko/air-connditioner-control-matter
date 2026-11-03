@@ -47,6 +47,12 @@ static_assert(CONFIG_APP_BUTTON_PAIRING_PRESS_COUNT != CONFIG_APP_BUTTON_PRESS_C
               "BOOT gestures for pairing mode and for the portal must differ");
 
 /* CHIP thread: only posts to the climate task queue. */
+/* Fan speed / Auto / swing chosen in a home app (CHIP thread, non blocking). */
+static void on_matter_fan(uint8_t fan, uint8_t swing)
+{
+    climate_control_set_fan_swing(fan, swing);
+}
+
 static void on_thermostat_change(const thermostat_user_state_t * s, uint32_t mask)
 {
     climate_control_on_user_change(s->system_mode, s->cool_setpoint, s->heat_setpoint, mask);
@@ -172,6 +178,8 @@ extern "C" void app_main(void)
     caps.cool_max          = lim.cool_max;
     caps.heat_min          = lim.heat_min;
     caps.heat_max          = lim.heat_max;
+    caps.fan_levels        = lim.fan_levels_mask;
+    caps.swing             = lim.swing;
     ESP_LOGI(TAG, "thermostat limits: cool %d..%d%s%s%s (%s)", caps.cool_min, caps.cool_max, caps.heat ? ", heat" : "",
              caps.dry ? ", dry" : "", caps.fan_only ? ", fan" : "", lim.from_profile ? "locked profile" : "defaults");
 
@@ -181,6 +189,13 @@ extern "C" void app_main(void)
 
     ESP_ERROR_CHECK(matter_thermostat_create(&caps, on_thermostat_change));
     matter_thermostat_set_ui_callback(on_matter_ui); /* before start: an uncommissioned device opens the window at boot */
+    {
+        /* Fan/swing restored by climate_control: shown in the Fan Control cluster from the start. */
+        climate_status_t cs;
+        climate_control_get_status(&cs);
+        matter_thermostat_set_fan(cs.fan, cs.swing);
+        matter_thermostat_set_fan_callback(on_matter_fan);
+    }
     err = matter_thermostat_start();
     if (err == ESP_ERR_TIMEOUT)
     {

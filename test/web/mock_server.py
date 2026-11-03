@@ -24,7 +24,7 @@ T0 = time.time()
 STATE = {
     "wifi": {"configured": True, "ssid": "NhaToi", "connected": True, "rssi": -58, "channel": 6,
              "ip4": "192.168.1.42", "ip6": ["fe80::1234:56ff:fe78:9abc", "fd12:3456::42"], "conflict": False,
-             "portal_open": True, "ap_ssid": "AC-Matter-1A2B-v1.1.0", "ap_clients": 1, "portal_remaining_s": 600,
+             "portal_open": True, "ap_ssid": "AC-Matter-1A2B-v1.2.0", "ap_clients": 1, "portal_remaining_s": 600,
              "job": 0, "job_message": "", "scanning": False},
     "scan": [],
     "scan_until": 0,
@@ -117,8 +117,8 @@ def matter():
     return {"started": True, "commissioner_ready": True, "home_fabrics": len(STATE["fabrics"]),
             "window_open": STATE["window_open"], "endpoint": 1, "heat": False, "vendor_id": 0xFFF1,
             "product_id": 0x8000, "discriminator": 2345, "ble": True,
-            "ble_advertising": STATE["window_open"], "ble_name": "AC-1A2B-v1.1.0",
-            "product_name": "May lanh IR v1.1.0", "node_label": "May lanh IR v1.1.0"}
+            "ble_advertising": STATE["window_open"], "ble_name": "AC-1A2B-v1.2.0",
+            "product_name": "May lanh IR v1.2.0", "node_label": "May lanh IR v1.2.0"}
 
 
 def pair_progress():
@@ -193,7 +193,7 @@ def route(method, path, q, f):
     s = STATE
     if method == "GET":
         if path == "session":
-            return {"token": TOKEN, "device": "May lanh IR v1.1.0", "version": "1.1.0", "test_mode": True}
+            return {"token": TOKEN, "device": "May lanh IR v1.2.0", "version": "1.2.0", "test_mode": True}
         if path == "status":
             p = s["profiles"][s["active"]]
             return {"wifi": s["wifi"], "matter": matter(), "temp": temp(), "sensor": sensor(False),

@@ -253,7 +253,7 @@ esp_err_t wifi_config_start(wifi_portal_hook_t hook)
     s_hook = hook;
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
-    /* "AC-Matter-1A2B-v1.1.0": the version suffix shows in the phone's Wi-Fi list which firmware runs
+    /* "AC-Matter-1A2B-v1.2.0": the version suffix shows in the phone's Wi-Fi list which firmware runs
      * (snprintf truncates to the 32-character SSID limit with a very long prefix). */
     snprintf(s_ap_ssid, sizeof(s_ap_ssid), "%s%02X%02X" APP_VERSION_SUFFIX, CONFIG_APP_AP_SSID_PREFIX, mac[4], mac[5]);
 

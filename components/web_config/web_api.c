@@ -1281,6 +1281,7 @@ static void post_ac_control(api_ctx_t *c)
     }
     if (has_fan) {
         climate_control_set_fan_swing((uint8_t)fan, (uint8_t)swing);
+        matter_thermostat_set_fan((uint8_t)fan, (uint8_t)swing); /* home apps show the same fan */
     }
     /* Goes through the Thermostat cluster: the home app sees the same state. */
     esp_err_t err = matter_thermostat_set_user_state(&st, mask);

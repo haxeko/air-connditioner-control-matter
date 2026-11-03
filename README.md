@@ -4,7 +4,7 @@ Firmware ESP-IDF thuần (không Arduino, không ESPHome, không Home Assistant/
 ESP32-S3 N16R8:
 
 - xuất hiện trong Google Home, Apple Home, SmartThings, Alexa, Aqara Home, Home Assistant… dưới dạng
-  **Matter Thermostat** tên **`May lanh IR v1.1.0`** (Tắt/Làm lạnh, Sưởi/Khô/Quạt chỉ khi profile máy lạnh
+  **Matter Thermostat** tên **`May lanh IR v1.2.0`** (Tắt/Làm lạnh, Sưởi/Khô/Quạt chỉ khi profile máy lạnh
   đã học các chế độ đó);
 - tự tạo **fabric riêng (Fabric B)** để ghép cảm biến nhiệt độ Matter đã có trong nhà bằng Multi-Admin,
   rồi **subscribe** trực tiếp nhiệt độ của cảm biến (kể cả cảm biến Thread qua Border Router sẵn có);
@@ -14,8 +14,14 @@ ESP32-S3 N16R8:
   ứng dụng tự gửi Wi-Fi nhà cho ESP qua Bluetooth;
 - **nhấn BOOT 3 lần** để mở Wi-Fi cấu hình và trang web tiếng Việt tại `http://192.168.4.1`;
 - lưu mọi cấu hình vào flash: mất điện không phải thiết lập lại;
-- mọi tên thiết bị phát ra đều có **hậu tố phiên bản firmware** (`v1.1.0`): tên Matter, tên Bluetooth
-  `AC-XXXX-v1.1.0`, Wi-Fi cấu hình `AC-Matter-XXXX-v1.1.0` – nhìn tên là biết thiết bị đang chạy bản nào.
+- mọi tên thiết bị phát ra đều có **hậu tố phiên bản firmware** (`v1.2.0`): tên Matter, tên Bluetooth
+  `AC-XXXX-v1.2.0`, Wi-Fi cấu hình `AC-Matter-XXXX-v1.2.0` – nhìn tên là biết thiết bị đang chạy bản nào.
+
+### Có gì mới trong v1.2.0
+
+- **Chỉnh quạt và đảo gió từ ứng dụng nhà**: thiết bị là **Room Air Conditioner** (kèm loại Thermostat) với
+  cluster **Fan Control** (tốc độ theo các mức quạt đã học, Auto, đảo gió lên/xuống) và **On/Off**. Chi tiết ở
+  [mục 7.1](#71-matter-thermostat-server-fabric-a). Tên thiết bị: `May lanh IR v1.2.0`.
 
 ### Có gì mới trong v1.1.0
 
@@ -27,9 +33,9 @@ ESP32-S3 N16R8:
   Bluetooth). Quan trọng: esp-matter mặc định tắt hẳn Bluetooth khi bảng fabric không rỗng
   (`CONFIG_USE_BLE_ONLY_FOR_COMMISSIONING`), mà Fabric B riêng của ESP luôn có mặt – nên tùy chọn này
   được tắt, nếu không Bluetooth sẽ bị gỡ ngay khi khởi động.
-- **Đặt lại tên thiết bị có hậu tố phiên bản**: ProductName/NodeLabel/DNS-SD `DN` = `May lanh IR v1.1.0`,
+- **Đặt lại tên thiết bị có hậu tố phiên bản**: ProductName/NodeLabel/DNS-SD `DN` = `May lanh IR v1.2.0`,
   VendorName `DIY` (v1.0.0 phát ra `TEST_PRODUCT`/`TEST_VENDOR` mặc định của SDK và NodeLabel trống), tên
-  Bluetooth `AC-XXXX-v1.1.0`, SSID cấu hình `AC-Matter-XXXX-v1.1.0`. Khi khởi động, NodeLabel trống hoặc còn
+  Bluetooth `AC-XXXX-v1.2.0`, SSID cấu hình `AC-Matter-XXXX-v1.2.0`. Khi khởi động, NodeLabel trống hoặc còn
   tên mặc định của bản cũ được đặt thành tên mới; tên đã đổi trong ứng dụng nhà được giữ nguyên.
 - Quảng bá DNS-SD có thêm `DT=769` (Thermostat). SoftwareVersion Matter = 10100.
 - Mã số 11 chữ số không đổi; nội dung QR đổi (thêm cờ Bluetooth) – tem QR in từ v1.0.0 vẫn dùng được
@@ -316,7 +322,7 @@ Playwright): `node test/web/ui_test.js http://127.0.0.1:8080/`.
 
 ### Bước 1 – Wi-Fi cấu hình và mật khẩu
 
-Mỗi thiết bị phát Wi-Fi cấu hình có SSID riêng `AC-Matter-XXXX-v1.1.0` (4 ký tự cuối MAC + phiên bản
+Mỗi thiết bị phát Wi-Fi cấu hình có SSID riêng `AC-Matter-XXXX-v1.2.0` (4 ký tự cuối MAC + phiên bản
 firmware). Mật khẩu mặc định
 (cố định, đặt bằng `CONFIG_APP_AP_PASSWORD` trong `sdkconfig.defaults`) là:
 
@@ -341,7 +347,7 @@ dùng và mã ghép Matter (kèm QR vẽ bằng ký tự). Các lệnh khác: `s
 
 1. Lần đầu (chưa có Wi-Fi) thiết bị tự phát Wi-Fi cấu hình. Các lần sau: **nhấn BOOT 3 lần nhanh** (trong
    1,5 s). 1–2 lần nhấn không làm gì; nhấn khi đang mở chỉ gia hạn thời gian.
-2. Điện thoại kết nối `AC-Matter-XXXX-v1.1.0`. Nếu điện thoại báo “không có Internet”, chọn **giữ kết nối**.
+2. Điện thoại kết nối `AC-Matter-XXXX-v1.2.0`. Nếu điện thoại báo “không có Internet”, chọn **giữ kết nối**.
 3. Mở `http://192.168.4.1` → tab **Wi-Fi** → *Quét mạng* → chọn mạng 2,4 GHz → nhập mật khẩu → **Lưu**.
 4. Chờ “Đã kết nối mạng mới”. Nếu sai mật khẩu, sau 40 s thiết bị tự quay lại mạng cũ (nếu có).
 
@@ -354,15 +360,15 @@ biến không bị gián đoạn.
    để in tem dán lên thiết bị), hoặc lệnh `secrets` trên cổng serial. Mã là cố định cho từng thiết bị (tạo
    ngẫu nhiên ở lần khởi động đầu, lưu NVS).
 2. Bật **chế độ ghép**: **nhấn nút BOOT 2 lần** (trong 1,5 s) → LED **nháy xanh dương** trong suốt thời gian
-   cho phép ghép (15 phút). Trong thời gian này ESP **phát Bluetooth** (tên `AC-XXXX-v1.1.0`) và, nếu đã vào
-   Wi-Fi nhà, quảng bá DNS-SD `_matterc._udp` (tên `May lanh IR v1.1.0`). ESP chưa có Wi-Fi vẫn ghép được qua
+   cho phép ghép (15 phút). Trong thời gian này ESP **phát Bluetooth** (tên `AC-XXXX-v1.2.0`) và, nếu đã vào
+   Wi-Fi nhà, quảng bá DNS-SD `_matterc._udp` (tên `May lanh IR v1.2.0`). ESP chưa có Wi-Fi vẫn ghép được qua
    Bluetooth. Khi thiết bị chưa thuộc hệ sinh thái nào, chế độ ghép tự bật 15 phút sau mỗi lần khởi động. Cũng
    có thể bật bằng nút *Mở cửa sổ ghép* trên web hoặc lệnh `pairing`.
 3. Trên điện thoại: **bật Bluetooth**, kết nối **Wi-Fi nhà 2,4 GHz** (ESP32 không dùng được 5 GHz; **không**
    kết nối Wi-Fi cấu hình `AC-Matter-…` khi ghép), đứng gần thiết bị. Trong Google Home / Apple Home /
    SmartThings / Alexa / Home Assistant: *Thêm thiết bị → Matter*, quét QR hoặc nhập mã số. Ứng dụng gửi
    Wi-Fi nhà qua Bluetooth, ESP vào mạng và ứng dụng hoàn tất qua Wi-Fi. Ghép xong, LED sáng xanh lá 2 s rồi
-   tắt; thiết bị hiện tên `May lanh IR v1.1.0` (đổi tên trong ứng dụng thì tên mới được giữ).
+   tắt; thiết bị hiện tên `May lanh IR v1.2.0` (đổi tên trong ứng dụng thì tên mới được giữ).
 4. Firmware dùng **chứng thư thiết bị thử nghiệm của SDK** (VID 0xFFF1): ứng dụng sẽ cảnh báo “thiết bị
    chưa được chứng nhận” – chọn vẫn thêm. Một số ứng dụng cần bật chế độ nhà phát triển/thiết bị thử nghiệm.
 5. Muốn thêm vào hệ sinh thái thứ hai: dùng chức năng chia sẻ (Multi-Admin) của hệ sinh thái thứ nhất, hoặc
@@ -383,7 +389,9 @@ biến không bị gián đoạn.
 
 1. Tab **Máy lạnh** → *Tạo profile mới* (tên, bước nhiệt độ của remote 1 °C hoặc 0,5 °C, sóng mang 0 = 38 kHz).
 2. Học lần lượt: **Tắt** (bắt buộc), **Làm lạnh** ở mọi nhiệt độ sẽ dùng (ví dụ 16–30 °C, quạt tự động),
-   thêm Sưởi/Khô/Quạt và các mức quạt/đảo gió nếu muốn. Mỗi lệnh:
+   thêm Sưởi/Khô/Quạt và các mức quạt/đảo gió nếu muốn. Mỗi mức quạt đã học (ví dụ Làm lạnh 26 °C quạt 1/2/3)
+   trở thành một tốc độ quạt trong ứng dụng nhà, đảo gió bật đã học thành nút đảo gió; nên học xong rồi mới thêm
+   thiết bị vào ứng dụng. Mỗi lệnh:
    - chọn trạng thái trên form; chỉnh remote tới **đúng** trạng thái đó;
    - *Bắt đầu học*, hướng remote vào đầu thu 5–30 cm, bấm một nút sao cho trạng thái cuối cùng trên remote
      đúng như đã chọn (remote máy lạnh gửi toàn bộ trạng thái mỗi lần bấm);
@@ -424,7 +432,17 @@ học IR hoặc thử Wi-Fi mới).
 
 ### 7.1 Matter Thermostat (server, Fabric A)
 
-- Endpoint Thermostat (device type 0x0301), FeatureMap: Cool, thêm Heat **chỉ khi** profile đã khóa có lệnh
+- Endpoint 1 khai báo hai loại thiết bị: **Room Air Conditioner** (0x0072) và **Thermostat** (0x0301) – bộ điều
+  khiển không biết loại máy lạnh vẫn thấy thermostat. Cluster: Identify, **On/Off**, Thermostat và (khi profile có
+  mức quạt đã học) **Fan Control**.
+- **On/Off**: Tắt = `SystemMode` Off; Bật = trở lại chế độ gần nhất khác Tắt (mặc định Làm lạnh). `SystemMode` luôn
+  là trạng thái gốc, On/Off và quạt đi theo nó.
+- **Fan Control** (từ v1.2.0): mỗi mức quạt đã học là một tốc độ Matter, thứ tự Êm → 1…5 → Turbo (`SpeedMax` = số
+  mức đã học), có **Auto** (quạt tự động) và **Rocking lên/xuống** = đảo gió (chỉ khi đã học đảo gió bật).
+  `FanModeSequence`: ≥ 3 mức → Off/Low/Medium/High/Auto, 2 mức → Off/Low/High/Auto, 1 mức → Off/High/Auto.
+  Chọn tốc độ khi máy đang tắt sẽ bật máy; FanMode Off = tắt máy lạnh. Mức quạt/đảo gió chọn trên web hiện
+  ngay trong ứng dụng nhà và ngược lại; lệnh IR vẫn là lệnh đã học khớp nhất (nhiệt độ ưu tiên trước).
+- Thermostat: FeatureMap Cool, thêm Heat **chỉ khi** profile đã khóa có lệnh
   Sưởi; `ControlSequenceOfOperation` tương ứng (CoolingOnly / CoolingAndHeating).
 - `SystemMode` chấp nhận: Off, Cool, và Heat/Dry/FanOnly chỉ khi đã học. Ghi sai bị từ chối.
 - Giới hạn `AbsMin/AbsMax/Min/MaxCoolSetpointLimit` (và Heat) = dải nhiệt độ **đã học** của profile; chưa có
@@ -502,7 +520,7 @@ học IR hoặc thử Wi-Fi mới).
 
 ### 9.1 Đã build
 
-- Toàn bộ firmware v1.1.0 build sạch cho `esp32s3` với IDF v6.0.2 + esp_matter 1.6.1 (cờ cảnh báo mặc định
+- Toàn bộ firmware v1.2.0 build sạch cho `esp32s3` với IDF v6.0.2 + esp_matter 1.6.1 (cờ cảnh báo mặc định
   của IDF, cảnh báo bị coi là lỗi), có Bluetooth (NimBLE + CHIPoBLE): ảnh 1,89 MB (khe OTA 4 MB, còn trống
   55 %), DIRAM tĩnh 45,7 %. Biến thể không Bluetooth (`test/variant/sdkconfig.variant`) cũng build được.
 - Mốc 1: server + commissioner Fabric B trên cùng CHIP stack build và link thành công.
@@ -541,16 +559,16 @@ bị tắt – khi đó không còn đường IPv6 tới mạng Thread.
 
 Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng thái.
 
-1. **Khởi động hai vai trò** – log có `App "ac_matter_ir" version: 1.1.0`, `thermostat endpoint 1 …`,
-   `device name: May lanh IR v1.1.0 (vendor DIY), firmware 1.1.0, BLE commissioning on`,
-   `BLE name: AC-XXXX-v1.1.0` và `commissioner ready: fabric index …, fabric 0x…, node 0x… (created)`; lần
+1. **Khởi động hai vai trò** – log có `App "ac_matter_ir" version: 1.2.0`, `room AC/thermostat endpoint 1 … fan control: N speed(s)`,
+   `device name: May lanh IR v1.2.0 (vendor DIY), firmware 1.2.0, BLE commissioning on`,
+   `BLE name: AC-XXXX-v1.2.0` và `commissioner ready: fabric index …, fabric 0x…, node 0x… (created)`; lần
    khởi động sau là `(restored)` với cùng fabric ID (không tạo fabric mới).
 1b. **Tìm thấy qua Bluetooth** – nhấn BOOT 2 lần; ứng dụng nRF Connect (hoặc ứng dụng nhà) thấy thiết bị
-   `AC-XXXX-v1.1.0` với dịch vụ `0xFFF6`. Thêm vào ứng dụng nhà bằng QR khi ESP **chưa** có Wi-Fi: ứng dụng
+   `AC-XXXX-v1.2.0` với dịch vụ `0xFFF6`. Thêm vào ứng dụng nhà bằng QR khi ESP **chưa** có Wi-Fi: ứng dụng
    gửi Wi-Fi, log `Disconnecting WiFi station interface`/`IP_EVENT_STA_GOT_IP` rồi `added to a home ecosystem`.
 2. **BOOT** – nhấn 1 lần: không có gì. Nhấn 2 lần: sau ~1,5 s log `BOOT x2: Matter pairing mode`,
    `pairing mode: commissioning window opened` và `CHIPoBLE advertising started`, LED nháy xanh dương; hết 15
-   phút hoặc ghép xong thì LED tắt. Nhấn 3 lần trong 1,5 s: log `portal open: SSID AC-Matter-XXXX-v1.1.0`,
+   phút hoặc ghép xong thì LED tắt. Nhấn 3 lần trong 1,5 s: log `portal open: SSID AC-Matter-XXXX-v1.2.0`,
    LED xanh lá. Nhấn 3 lần lần nữa:
    `portal already open: lifetime extended`. Giữ nút lâu: không có gì xảy ra (không factory reset).
 3. **Ghép cảm biến** – theo bước 5; trang Cảm biến hiển thị endpoint và giá trị đọc thử; sau khi Lưu, trạng
@@ -578,8 +596,12 @@ Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng
 
 - **Chứng thư thử nghiệm** (DAC/PAI ví dụ của SDK, VID 0xFFF1): ứng dụng nhà cảnh báo thiết bị chưa chứng
   nhận. Sản phẩm thật cần DAC/PAI riêng (phân vùng `fctry`/esp_secure_cert) và chứng nhận CSA.
-- Fan/swing chỉ điều khiển trên web: cluster Thermostat không có mô hình chuẩn cho chúng; không xuất qua
-  Matter để tránh hành vi khác nhau giữa các nền tảng.
+- Mức quạt/đảo gió hiện trong ứng dụng nhà tùy ứng dụng: Home Assistant hiện đủ; Apple Home, Google Home,
+  SmartThings hiển thị Room Air Conditioner + Fan Control khác nhau theo phiên bản – cần kiểm tra trên điện
+  thoại. Ứng dụng không hiện thì vẫn chỉnh được trên web.
+- Cluster Fan Control chỉ được tạo khi profile **đã khóa** có lệnh với mức quạt cụ thể (không chỉ “Tự động”).
+  Học thêm mức quạt rồi khóa profile **trước khi** thêm vào ứng dụng nhà; nếu thêm mức quạt sau, khởi động lại
+  ESP và có thể phải xóa/thêm lại thiết bị để ứng dụng đọc lại cấu trúc.
 - Thay đổi giới hạn/chế độ của profile chỉ áp dụng cho Matter sau khi khởi động lại (cấu trúc endpoint được
   tạo lúc khởi động).
 - Cảm biến ICD dạng LIT (ngủ rất lâu, cần check-in) chưa được xử lý riêng; cảm biến SIT/thường được hỗ trợ.
@@ -607,9 +629,9 @@ Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng
 | Cảm biến cục bộ | `APP_LOCAL_SENSOR_NONE/SHT4X/SHT3X`, `..._SDA_GPIO` (8), `..._SCL_GPIO` (9), `..._PERIOD_S` (60) |
 | Thử nghiệm | `APP_TEST_SIMULATED_SENSOR` (**n**) – nguồn nhiệt độ giả lập, chỉ để thử trên bàn, hiển thị rõ “GIẢ LẬP” |
 
-**Phiên bản firmware** chỉ đặt một chỗ: `set(PROJECT_VER "1.1.0")` trong `CMakeLists.txt` gốc. Từ đó sinh
+**Phiên bản firmware** chỉ đặt một chỗ: `set(PROJECT_VER "1.2.0")` trong `CMakeLists.txt` gốc. Từ đó sinh
 ra phiên bản ứng dụng ESP-IDF, `SoftwareVersionString` Matter, `SoftwareVersion` = MAJOR·10000 + MINOR·100 +
-PATCH (10100) và hậu tố `v1.1.0` của mọi tên (macro `APP_FW_VERSION`, `components/app_state/include/app_version.h`,
+PATCH (10200) và hậu tố `v1.2.0` của mọi tên (macro `APP_FW_VERSION`, `components/app_state/include/app_version.h`,
 `main/matter_project_config.h`).
 
 **Bluetooth** (`sdkconfig.defaults`): `CONFIG_BT_ENABLED`, `CONFIG_BT_NIMBLE_ENABLED`, `CONFIG_ENABLE_CHIPOBLE`

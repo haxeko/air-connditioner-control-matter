@@ -70,6 +70,8 @@ typedef struct {
     bool heat, dry, fan_only;
     int16_t cool_min, cool_max;
     int16_t heat_min, heat_max;
+    uint16_t fan_levels_mask; /* learned fan speeds (1 << ac_fan_t), AC_FAN_AUTO excluded */
+    bool swing;               /* swing on learned */
 } ac_thermostat_limits_t;
 
 #define AC_DEFAULT_COOL_MIN_CENTI 1600

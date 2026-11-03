@@ -1,6 +1,6 @@
-# Firmware đã build sẵn – v1.1.0 (ESP32-S3, flash 16 MB)
+# Firmware đã build sẵn – v1.2.0 (ESP32-S3, flash 16 MB)
 
-Build với ESP-IDF v6.0.2 + esp_matter 1.6.1, cấu hình mặc định (`sdkconfig.defaults`), phiên bản 1.1.0.
+Build với ESP-IDF v6.0.2 + esp_matter 1.6.1, cấu hình mặc định (`sdkconfig.defaults`), phiên bản 1.2.0.
 
 | File | Địa chỉ | Dùng khi |
 |---|---|---|
@@ -23,16 +23,16 @@ File full được đệm `0xFF` qua vùng NVS (`0x10000`–`0x2FFFF`), nên n�
 mã mới), Fabric B và cảm biến đã ghép; profile IR ở phân vùng `irstore` (`0x840000`) vẫn còn.
 
 SHA-256:
-- `8cffe5d4633bdba41b2e8cf51ba25b7dcaa6d756c25c8c61b7d981611d00d873`  ac_matter_ir_full_0x0.bin
-- `d56617348ca82f0e0a66a3ee431cf33b5d9c1f7312e7729e5ddd3f2d9c371a94`  ac_matter_ir_app_0x40000.bin
+- `94921ffab94a132cb346cc5e6873d1f027b5b2af4e498c24836476ee34b9bbb9`  ac_matter_ir_full_0x0.bin
+- `dfa1bfd53791a69d8c0895c70634face66dfcbf63088528a0f8a7f2c02993deb`  ac_matter_ir_app_0x40000.bin
 
 ## Tên thiết bị (có hậu tố phiên bản)
 
 | Ở đâu | Tên |
 |---|---|
-| Ứng dụng nhà (Matter ProductName, NodeLabel, DNS-SD) | `May lanh IR v1.1.0` (hãng: `DIY`) |
-| Bluetooth | `AC-XXXX-v1.1.0` |
-| Wi-Fi cấu hình | `AC-Matter-XXXX-v1.1.0`, mật khẩu `69696969` |
+| Ứng dụng nhà (Matter ProductName, NodeLabel, DNS-SD) | `May lanh IR v1.2.0` (hãng: `DIY`) |
+| Bluetooth | `AC-XXXX-v1.2.0` |
+| Wi-Fi cấu hình | `AC-Matter-XXXX-v1.2.0`, mật khẩu `69696969` |
 
 `XXXX` = 4 ký tự cuối địa chỉ MAC, giống nhau ở Bluetooth và Wi-Fi cấu hình.
 
@@ -46,4 +46,10 @@ SHA-256:
 Mã QR / mã 11 số: trang "Nhà thông minh" của Wi-Fi cấu hình (BOOT 3 lần, `http://192.168.4.1`) hoặc lệnh
 `secrets` trên cổng serial. Mã số không đổi so với v1.0.0; QR có thêm cờ Bluetooth nên nên in lại tem.
 
-Log khởi động phải có `device name: May lanh IR v1.1.0 (vendor DIY), firmware 1.1.0, BLE commissioning on`.
+Log khởi động phải có `device name: May lanh IR v1.2.0 (vendor DIY), firmware 1.2.0, BLE commissioning on`.
+
+## Quạt và đảo gió trong ứng dụng nhà (v1.2.0)
+
+Thiết bị là **Room Air Conditioner** (kèm loại Thermostat) có cluster **Fan Control**: mỗi mức quạt đã học
+là một tốc độ quạt, có chế độ Tự động và đảo gió (nếu đã học đảo gió bật). Học các mức quạt và **khóa
+profile trước khi thêm vào ứng dụng nhà**. Cách mỗi ứng dụng hiển thị quạt khác nhau; chưa thử trên thiết bị thật.

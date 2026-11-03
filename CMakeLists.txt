@@ -9,7 +9,7 @@ cmake_minimum_required(VERSION 3.16)
 # Firmware version: the only place to change it. It is the ESP-IDF app version, the Matter
 # SoftwareVersionString, and the "vX.Y.Z" suffix of every name the device publishes
 # (Matter product/node/commissionable name, BLE name, configuration Wi-Fi SSID).
-set(PROJECT_VER "1.1.0")
+set(PROJECT_VER "1.2.0")
 # Matter SoftwareVersion (uint32, must grow with every release): MAJOR*10000 + MINOR*100 + PATCH.
 if(NOT PROJECT_VER MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
     message(FATAL_ERROR "PROJECT_VER must be MAJOR.MINOR.PATCH, got '${PROJECT_VER}'")

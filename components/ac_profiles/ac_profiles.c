@@ -619,4 +619,6 @@ void ac_profiles_thermostat_limits(int slot, ac_thermostat_limits_t *out)
     }
     out->dry = (caps.modes_mask & (1u << AC_MODE_DRY)) != 0;
     out->fan_only = (caps.modes_mask & (1u << AC_MODE_FAN)) != 0;
+    out->fan_levels_mask = caps.fans_mask & (uint16_t)~(1u << AC_FAN_AUTO);
+    out->swing = (caps.swing_mask & (1u << AC_SWING_ON)) != 0;
 }

@@ -8,12 +8,15 @@
 
 #include <app-common/zap-generated/ids/Attributes.h>
 #include <app-common/zap-generated/ids/Clusters.h>
+#include <app/clusters/fan-control-server/CodegenIntegration.h>
+#include <app/clusters/fan-control-server/FanControlCluster.h>
 #include <app/server/CommissioningWindowManager.h>
 #include <app/server/Server.h>
 #include <platform/CHIPDeviceLayer.h>
 #include <platform/DeviceInstanceInfoProvider.h>
 #include <setup_payload/OnboardingCodesUtil.h>
 
+#include "ac_types.h"
 #include "app_state.h"
 #include "app_version.h"
 #include "device_identity.h"
@@ -59,6 +62,20 @@ SemaphoreHandle_t sInitDone;
 StaticSemaphore_t sInitDoneBuf;
 bool sRestoring; /* boot-time clamping: attribute updates are not user changes */
 matter_ui_event_cb_t sUiCb;
+
+/* ---- Fan of the AC (Fan Control cluster) and power (On/Off cluster of the Room Air Conditioner) ----
+ * The thermostat SystemMode stays the single source of truth for power and mode: On/Off and FanMode
+ * Off are mapped onto SystemMode Off, On restores the last mode that was not Off. Fan speeds are the
+ * learned fan levels of the active profile, slowest first: Matter speed 1..SpeedMax. */
+using FanStatus = chip::Protocols::InteractionModel::Status;
+thermostat_fan_change_cb_t sFanCb;
+uint8_t sFan = AC_FAN_AUTO;   /* current AC fan as shown in Matter (ac_fan_t) */
+uint8_t sSwing = AC_SWING_OFF;
+uint8_t sSpeeds[AC_FAN_COUNT]; /* Matter speed n -> sSpeeds[n - 1] (ac_fan_t) */
+uint8_t sSpeedCount;
+bool sHasFanCluster;
+uint8_t sLastOnMode = TSTAT_MODE_COOL;
+bool sSyncing; /* writes made by this file: ignore the resulting callbacks */
 
 void NotifyUi(matter_ui_event_t ev)
 {
@@ -136,11 +153,177 @@ void NotifyUser(uint32_t mask)
     }
 }
 
+uint8_t SpeedOfFan(uint8_t fan)
+{
+    for (uint8_t i = 0; i < sSpeedCount; i++) {
+        if (sSpeeds[i] == fan) {
+            return static_cast<uint8_t>(i + 1);
+        }
+    }
+    return 0;
+}
+
+FanControlCluster * FanCluster()
+{
+    return sHasFanCluster ? FanControl::FindClusterOnEndpoint(sEndpointId) : nullptr;
+}
+
+uint8_t CurrentMode()
+{
+    Guard g;
+    return sUser.system_mode;
+}
+
+/* CHIP thread. Show the current power/fan/swing in the On/Off and Fan Control clusters. */
+void SyncPowerAndFan()
+{
+    const uint8_t mode = CurrentMode();
+    sSyncing = true;
+    esp_matter_attr_val_t on = esp_matter_bool(mode != TSTAT_MODE_OFF);
+    attribute::update(sEndpointId, OnOff::Id, OnOff::Attributes::OnOff::Id, &on);
+    FanControlCluster * fan = FanCluster();
+    if (fan != nullptr) {
+        uint8_t fanCopy;
+        uint8_t swingCopy;
+        {
+            Guard g;
+            fanCopy = sFan;
+            swingCopy = sSwing;
+        }
+        const uint8_t speed = SpeedOfFan(fanCopy);
+        if (mode == TSTAT_MODE_OFF) {
+            fan->SetFanMode(FanControl::FanModeEnum::kOff);
+        } else if (speed == 0) {
+            /* Auto, or a level that is not learned (the IR command then uses the default fan) */
+            fan->SetFanMode(FanControl::FanModeEnum::kAuto);
+        } else {
+            fan->SetSpeedSetting(chip::app::DataModel::MakeNullable(speed));
+            fan->SetSpeedCurrent(speed);
+            chip::app::DataModel::Nullable<chip::Percent> pct = fan->GetPercentSetting();
+            fan->SetPercentCurrent(pct.IsNull() ? 0 : pct.Value());
+        }
+        if (fan->GetFeatureMap().Has(FanControl::Feature::kRocking)) {
+            chip::BitMask<FanControl::RockBitmap> rock;
+            if (swingCopy == AC_SWING_ON) {
+                rock.Set(FanControl::RockBitmap::kRockUpDown);
+            }
+            fan->SetRockSetting(rock);
+        }
+    }
+    sSyncing = false;
+}
+
+void SyncPowerAndFanWork(intptr_t)
+{
+    SyncPowerAndFan();
+}
+
+/* CHIP thread (scheduled, never from inside an attribute callback). */
+void SetModeWork(intptr_t mode)
+{
+    if (CurrentMode() == static_cast<uint8_t>(mode)) {
+        SyncPowerAndFan(); /* e.g. On while already on: just show the real state */
+        return;
+    }
+    esp_matter_attr_val_t v = esp_matter_enum8(static_cast<uint8_t>(mode));
+    if (attribute::update(sEndpointId, Thermostat::Id, Thermostat::Attributes::SystemMode::Id, &v) != ESP_OK) {
+        SyncPowerAndFan(); /* rejected: put On/Off and the fan back */
+    }
+}
+
+void ScheduleMode(uint8_t mode)
+{
+    LogErrorOnFailure(chip::DeviceLayer::PlatformMgr().ScheduleWork(SetModeWork, mode));
+}
+
+void NotifyFan()
+{
+    uint8_t fan;
+    uint8_t swing;
+    {
+        Guard g;
+        fan = sFan;
+        swing = sSwing;
+    }
+    if (sFanCb) {
+        sFanCb(fan, swing);
+    }
+}
+
+class AcFanDelegate final : public FanControl::Delegate
+{
+public:
+    FanStatus HandleStep(FanControl::StepDirectionEnum, bool, bool) override { return FanStatus::UnsupportedCommand; }
+
+    /* A home app changed FanMode / PercentSetting / SpeedSetting (CHIP thread). */
+    void OnFanDriveStateChanged(const FanControl::FanDriveState & state) override
+    {
+        if (sSyncing || !sStarted) {
+            return;
+        }
+        uint8_t speed = 0;
+        if (!state.speedSetting.IsNull()) {
+            speed = state.speedSetting.Value();
+        } else if (!state.percentSetting.IsNull() && sSpeedCount > 0) {
+            speed = static_cast<uint8_t>((sSpeedCount * state.percentSetting.Value() + 99) / 100);
+        }
+        if (state.mode == FanControl::FanModeEnum::kOff || (state.mode != FanControl::FanModeEnum::kAuto && speed == 0)) {
+            ScheduleMode(TSTAT_MODE_OFF); /* the fan of an AC is off only when the AC is off */
+            return;
+        }
+        uint8_t fan = AC_FAN_AUTO;
+        if (state.mode != FanControl::FanModeEnum::kAuto && sSpeedCount > 0) {
+            fan = sSpeeds[(speed > sSpeedCount ? sSpeedCount : speed) - 1];
+        }
+        {
+            Guard g;
+            sFan = fan;
+        }
+        FanControlCluster * c = FanCluster();
+        if (c != nullptr && fan != AC_FAN_AUTO) {
+            c->SetSpeedCurrent(SpeedOfFan(fan)); /* allowed from the change callback */
+            c->SetPercentCurrent(state.percentSetting.IsNull() ? 0 : state.percentSetting.Value());
+        }
+        ESP_LOGI(TAG, "fan from Matter: %s", ac_fan_name(fan));
+        NotifyFan();
+        if (CurrentMode() == TSTAT_MODE_OFF) {
+            ScheduleMode(sLastOnMode); /* choosing a fan speed turns the AC on */
+        }
+    }
+
+    void OnRockSettingChanged(chip::BitMask<FanControl::RockBitmap> value) override
+    {
+        if (sSyncing || !sStarted) {
+            return;
+        }
+        {
+            Guard g;
+            sSwing = value.Has(FanControl::RockBitmap::kRockUpDown) ? AC_SWING_ON : AC_SWING_OFF;
+        }
+        ESP_LOGI(TAG, "swing from Matter: %s", sSwing == AC_SWING_ON ? "on" : "off");
+        NotifyFan();
+    }
+};
+
+AcFanDelegate sFanDelegate;
+
 esp_err_t AttributeCallback(attribute::callback_type_t type, uint16_t endpoint_id, uint32_t cluster_id,
                             uint32_t attribute_id, esp_matter_attr_val_t * val, void * priv_data)
 {
     (void)priv_data;
-    if (endpoint_id != sEndpointId || cluster_id != Thermostat::Id || val == nullptr) {
+    if (endpoint_id != sEndpointId || val == nullptr) {
+        return ESP_OK;
+    }
+    if (cluster_id == OnOff::Id) {
+        /* On/Off of the Room Air Conditioner = SystemMode Off / last mode (applied after the callback) */
+        /* only commands from controllers: not our own sync, not the restore while the stack starts */
+        if (type == attribute::POST_UPDATE && attribute_id == OnOff::Attributes::OnOff::Id && !sSyncing && !sRestoring &&
+            sStarted) {
+            ScheduleMode(val->val.b ? sLastOnMode : static_cast<uint8_t>(TSTAT_MODE_OFF));
+        }
+        return ESP_OK;
+    }
+    if (cluster_id != Thermostat::Id) {
         return ESP_OK;
     }
     if (type == attribute::PRE_UPDATE) {
@@ -168,6 +351,9 @@ esp_err_t AttributeCallback(attribute::callback_type_t type, uint16_t endpoint_i
         Guard g;
         if (attribute_id == Thermostat::Attributes::SystemMode::Id) {
             sUser.system_mode = val->val.u8;
+            if (val->val.u8 != TSTAT_MODE_OFF) {
+                sLastOnMode = val->val.u8;
+            }
             mask = TSTAT_CHANGED_MODE;
         } else if (attribute_id == Thermostat::Attributes::OccupiedCoolingSetpoint::Id) {
             sUser.cool_setpoint = val->val.i16;
@@ -179,6 +365,9 @@ esp_err_t AttributeCallback(attribute::callback_type_t type, uint16_t endpoint_i
     }
     if (mask && !sRestoring) {
         NotifyUser(mask);
+    }
+    if (mask == TSTAT_CHANGED_MODE && sStarted) {
+        LogErrorOnFailure(chip::DeviceLayer::PlatformMgr().ScheduleWork(SyncPowerAndFanWork, 0)); /* On/Off + fan follow the mode */
     }
     return ESP_OK;
 }
@@ -301,7 +490,7 @@ void RefreshNodeLabel()
     }
 }
 
-/* BLE GAP name "AC-1A2B-v1.1.0" (same MAC digits as the configuration Wi-Fi SSID). CHIP allows at
+/* BLE GAP name "AC-1A2B-v1.2.0" (same MAC digits as the configuration Wi-Fi SSID). CHIP allows at
  * most 15 characters; without the version it would not fit, the MAC digits are dropped first. */
 void SetBleName()
 {
@@ -372,6 +561,17 @@ void InitAfterServer(intptr_t)
     }
     sRestoring = false;
 
+    {
+        Guard g;
+        if (sUser.system_mode != TSTAT_MODE_OFF) {
+            sLastOnMode = sUser.system_mode;
+        }
+    }
+    if (sHasFanCluster) {
+        FanControl::SetDefaultDelegate(sEndpointId, &sFanDelegate);
+    }
+    SyncPowerAndFan();
+
     OpenWindowIfUncommissioned();
     sStarted = true;
     NotifyUser(TSTAT_CHANGED_BOOT | TSTAT_CHANGED_MODE | TSTAT_CHANGED_COOL_SP | TSTAT_CHANGED_HEAT_SP);
@@ -440,6 +640,30 @@ void CloseWindowWork(intptr_t)
 
 } // namespace
 
+extern "C" void matter_thermostat_set_fan_callback(thermostat_fan_change_cb_t cb)
+{
+    sFanCb = cb;
+}
+
+extern "C" esp_err_t matter_thermostat_set_fan(uint8_t fan, uint8_t swing)
+{
+    if (fan >= AC_FAN_COUNT || swing >= AC_SWING_COUNT) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (sLock == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    {
+        Guard g;
+        sFan = fan;
+        sSwing = swing;
+    }
+    if (sStarted) {
+        return chip::DeviceLayer::PlatformMgr().ScheduleWork(SyncPowerAndFanWork, 0) == CHIP_NO_ERROR ? ESP_OK : ESP_FAIL;
+    }
+    return ESP_OK; /* shown by InitAfterServer() */
+}
+
 extern "C" void matter_thermostat_set_ui_callback(matter_ui_event_cb_t cb)
 {
     sUiCb = cb;
@@ -462,7 +686,9 @@ extern "C" esp_err_t matter_thermostat_create(const thermostat_caps_t * caps, th
         return ESP_FAIL;
     }
 
-    endpoint::thermostat::config_t cfg;
+    /* Room Air Conditioner (On/Off + Thermostat, Fan Control below), also listed as Thermostat so a
+     * controller that does not know the Room Air Conditioner device type still shows a thermostat. */
+    endpoint::room_air_conditioner::config_t cfg;
     cfg.thermostat.local_temperature = nullable<int16_t>(); /* null until a valid sensor value arrives */
     cfg.thermostat.system_mode = TSTAT_MODE_OFF;
     cfg.thermostat.control_sequence_of_operation = caps->heat ? kSeqCoolingAndHeating : kSeqCoolingOnly;
@@ -480,11 +706,53 @@ extern "C" esp_err_t matter_thermostat_create(const thermostat_caps_t * caps, th
         cfg.thermostat.features.heating.occupied_heating_setpoint = heatDefault;
     }
 
-    endpoint_t * ep = endpoint::thermostat::create(node, &cfg, ENDPOINT_FLAG_NONE, nullptr);
+    endpoint_t * ep = endpoint::room_air_conditioner::create(node, &cfg, ENDPOINT_FLAG_NONE, nullptr);
     if (ep == nullptr) {
         return ESP_FAIL;
     }
+    if (endpoint::add_device_type(ep, endpoint::thermostat::get_device_type_id(),
+                                  endpoint::thermostat::get_device_type_version()) != ESP_OK) {
+        return ESP_FAIL;
+    }
     sEndpointId = endpoint::get_id(ep);
+
+    /* Fan Control: one Matter speed per learned fan level (slowest first), Auto, and Rocking (up/down)
+     * when swing on was learned. Without learned fan levels there is nothing to offer. */
+    static const uint8_t kSpeedOrder[] = { AC_FAN_QUIET, AC_FAN_1, AC_FAN_2, AC_FAN_3, AC_FAN_4, AC_FAN_5, AC_FAN_TURBO };
+    sSpeedCount = 0;
+    for (uint8_t f : kSpeedOrder) {
+        if (caps->fan_levels & (1u << f)) {
+            sSpeeds[sSpeedCount++] = f;
+        }
+    }
+    sHasFanCluster = false;
+    if (sSpeedCount > 0) {
+        using FanControl::FanModeSequenceEnum;
+        cluster::fan_control::config_t fc;
+        fc.fan_mode = static_cast<uint8_t>(FanControl::FanModeEnum::kOff);
+        fc.fan_mode_sequence = static_cast<uint8_t>(sSpeedCount >= 3   ? FanModeSequenceEnum::kOffLowMedHighAuto
+                                                        : sSpeedCount == 2 ? FanModeSequenceEnum::kOffLowHighAuto
+                                                                           : FanModeSequenceEnum::kOffHighAuto);
+        fc.percent_setting = nullable<uint8_t>(0);
+        fc.percent_current = 0;
+        cluster_t * fan = cluster::fan_control::create(ep, &fc, CLUSTER_FLAG_SERVER);
+        if (fan == nullptr) {
+            return ESP_FAIL;
+        }
+        cluster::fan_control::feature::multi_speed::config_t ms;
+        ms.speed_max = sSpeedCount;
+        ms.speed_setting = nullable<uint8_t>(0);
+        ms.speed_current = 0;
+        cluster::fan_control::feature::multi_speed::add(fan, &ms);
+        cluster::fan_control::feature::fan_auto::add(fan);
+        if (caps->swing) {
+            cluster::fan_control::feature::rocking::config_t rc;
+            rc.rock_support = static_cast<uint8_t>(FanControl::RockBitmap::kRockUpDown);
+            rc.rock_setting = 0;
+            cluster::fan_control::feature::rocking::add(fan, &rc);
+        }
+        sHasFanCluster = true;
+    }
 
     cluster_t * tstat = cluster::get(ep, Thermostat::Id);
     if (tstat == nullptr) {
@@ -509,8 +777,9 @@ extern "C" esp_err_t matter_thermostat_create(const thermostat_caps_t * caps, th
         sUser.cool_setpoint = coolDefault;
         sUser.heat_setpoint = caps->heat ? cfg.thermostat.features.heating.occupied_heating_setpoint : 0;
     }
-    ESP_LOGI(TAG, "thermostat endpoint %u (cool %d..%d%s)", sEndpointId, caps->cool_min, caps->cool_max,
-             caps->heat ? ", heat" : "");
+    ESP_LOGI(TAG, "room AC/thermostat endpoint %u (cool %d..%d%s), fan control: %u speed(s)%s", sEndpointId,
+             caps->cool_min, caps->cool_max, caps->heat ? ", heat" : "", sSpeedCount,
+             sHasFanCluster && caps->swing ? " + swing" : "");
     return ESP_OK;
 }
 
