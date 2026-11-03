@@ -276,6 +276,9 @@ idf.py build
 Lần build đầu, component manager tải `esp_matter 1.6.1` và các phụ thuộc đúng như `dependencies.lock`
 (cần Internet; các lần sau không cần). Build toàn bộ connectedhomeip mất khá lâu (10–30 phút).
 
+Đóng gói file `.bin` dựng sẵn (tên có hậu tố phiên bản, ví dụ `ac_matter_ir_v1.2.0_app_0x40000.bin`) vào
+`firmware/`: `python tools/package_firmware.py`.
+
 Nâng cấp thư mục đã build bản cũ (v1.0.0 không có Bluetooth): xóa `sdkconfig` để áp dụng
 `sdkconfig.defaults` mới, rồi build lại (`idf.py set-target esp32s3` cũng tạo lại `sdkconfig`):
 
@@ -379,7 +382,7 @@ biến không bị gián đoạn.
 | Dấu hiệu | Cách xử lý |
 |---|---|
 | LED không nháy xanh dương | Chế độ ghép chưa bật hoặc đã hết 15 phút: nhấn BOOT 2 lần. Log phải có `pairing mode: commissioning window opened` và `CHIPoBLE advertising started`. |
-| Log có `BLE commissioning off` | Đang chạy firmware/`sdkconfig` cũ không có Bluetooth: nạp `firmware/ac_matter_ir_app_0x40000.bin` ở `0x40000` (giữ dữ liệu, xem `firmware/README.md`), hoặc khi tự build thì **xóa file `sdkconfig`** rồi build lại (giá trị cũ trong `sdkconfig` được ưu tiên hơn `sdkconfig.defaults`). |
+| Log có `BLE commissioning off` | Đang chạy firmware/`sdkconfig` cũ không có Bluetooth: nạp `firmware/ac_matter_ir_v<phiên bản>_app_0x40000.bin` ở `0x40000` (giữ dữ liệu, xem `firmware/README.md`), hoặc khi tự build thì **xóa file `sdkconfig`** rồi build lại (giá trị cũ trong `sdkconfig` được ưu tiên hơn `sdkconfig.defaults`). |
 | Ứng dụng tìm mãi rồi báo lỗi | Bật Bluetooth + vị trí (Android cần quyền vị trí/thiết bị lân cận cho ứng dụng nhà), đứng gần ESP, tắt rồi bật lại chế độ ghép. Dùng mã QR/mã số của **chính** thiết bị (tab *Nhà thông minh* hoặc lệnh `secrets`). |
 | Ghép qua Bluetooth xong nhưng kẹt ở “đang kết nối mạng” | Wi-Fi nhà phải 2,4 GHz (hoặc mạng gộp 2,4/5 GHz), mật khẩu WPA2, router không bật cách ly thiết bị (AP/client isolation) giữa điện thoại và ESP. |
 | Ghép qua mạng (không Bluetooth) | ESP phải đã vào Wi-Fi nhà (tab Wi-Fi), điện thoại cùng mạng đó, không ở Wi-Fi khách; router phải chuyển multicast mDNS (tắt “IGMP snooping”/“multicast to unicast” nếu ứng dụng không tìm thấy). |
