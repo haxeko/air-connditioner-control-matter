@@ -34,10 +34,8 @@ NC = NX * NY
 CLEAR = 0.2                     # copper clearance (mm)
 EDGE = 0.3                      # copper to board edge (mm)
 MARGIN = 0.03                   # grid discretisation margin (mm)
-CLASSES = {"Default": dict(w=0.25, via=0.6, drill=0.3), "Power": dict(w=0.5, via=0.8, drill=0.4),
-           "USB": dict(w=0.2, via=0.6, drill=0.3)}
+CLASSES = {"Default": dict(w=0.25, via=0.6, drill=0.3), "Power": dict(w=0.5, via=0.8, drill=0.4)}
 POWER_NETS = {"VBUS", "+5V", "+3V3", "/IR_A", "/IR_M", "/IR_K"}
-USB_NETS = {"/USB_DP", "/USB_DN", "/CC1", "/CC2"}   # 0.5 mm pitch USB-C pads: 0.2 mm tracks
 LAYER_COST = (1.0, 1.5)         # prefer the top layer: the bottom layer is the GND plane
 VIA_COST = 40.0                 # in grid steps
 TURN_COST = 0.4
@@ -45,8 +43,8 @@ PRES0, PRES_MULT, HIST_INC = 0.6, 1.7, 1.5
 MAX_ITER = 40
 # Areas where a component body sits on the top copper: no top-layer tracks or vias there.
 NO_TOP = [(9.0, -1.0, 25.0, 18.5),      # ESP32-S3 module body inside its pad ring
-          (-1.0, 21.73, 6.5, 30.67)]    # USB-C metal shell
-ORDER = ["/USB_DP", "/USB_DN", "/CC1", "/CC2", "VBUS", "/EN", "/IR_TX", "/IR_RX", "/SDA", "/SCL",
+          (-1.0, 21.68, 5.6, 30.72)]    # USB-C metal shell (pads start at x = 5.68)
+ORDER = ["/CC1", "/CC2", "VBUS", "/EN", "/IR_TX", "/IR_RX", "/SDA", "/SCL",
          "+5V", "/IR_A", "/IR_M", "/IR_K", "+3V3", "/IO0", "/IR_GATE", "/IR_VS",
          "/RGB", "/RGB_DIN", "/LED_VDD", "/TXD0", "/RXD0"]
 
@@ -68,9 +66,7 @@ def to_mm(v):
 
 
 def cls_of(net):
-    if net in POWER_NETS:
-        return "Power"
-    return "USB" if net in USB_NETS else "Default"
+    return "Power" if net in POWER_NETS else "Default"
 
 
 # ------------------------------------------------------------------ geometry items
@@ -505,11 +501,14 @@ class Router:
                 continue
             key = (round(it.geo[0], 3), round(it.geo[1], 3))
             if key in seen:
-                continue                     # stacked pads (USB-C A1/B12, A12/B1) share one via
+                continue                     # stacked pads share one via
             seen.add(key)
             ref = pad.GetParentFootprint().GetReference()
             if ref == "U1" and pad.GetNumber() == "41":
                 continue                     # exposed pad has its own thermal vias
+            if any(o.pad.GetParentFootprint().GetReference() == ref and
+                   o.pad.GetAttribute() == pcbnew.PAD_ATTRIB_PTH for o in self.pads["GND"]):
+                continue                     # connector GND pins: tied by its plated shell pins and the pour
             tblock, vblock = self.maps.hard("GND", k, dyn_hard=True)
             src = set(l * NC + c for l, c in self.allowed_cells(it, w) if l == 0)
             for s in src:

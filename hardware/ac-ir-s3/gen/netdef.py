@@ -6,7 +6,7 @@ Net names are the names that end up in the netlist and on the board.
 
 PROJECT = "ac_ir_s3"
 TITLE = "AC IR Matter module (ESP32-S3-WROOM-1-N16R8)"
-REV = "1.0"
+REV = "1.1"
 DATE = "2026-11-09"
 COMPANY = "DIY - air-connditioner-control-matter"
 
@@ -24,19 +24,16 @@ R1206 = "Resistor_SMD:R_1206_3216Metric_Pad1.30x1.75mm_HandSolder"
 PARTS = {
     "U1": dict(lib="RF_Module:ESP32-S3-WROOM-1", value="ESP32-S3-WROOM-1-N16R8", fp="RF_Module:ESP32-S3-WROOM-1",
                pins={"1": "GND", "40": "GND", "41": "GND", "2": "+3V3", "3": "EN", "27": "IO0",
-                     "4": "IR_TX", "5": "IR_RX", "12": "SDA", "17": "SCL", "13": "USB_DN", "14": "USB_DP",
+                     "4": "IR_TX", "5": "IR_RX", "12": "SDA", "17": "SCL",
                      "25": "RGB", "36": "RXD0", "37": "TXD0"},
                fields={"Spec": "Wi-Fi/BLE module, 16 MB flash, 8 MB octal PSRAM", "MPN": "ESP32-S3-WROOM-1-N16R8"}),
-    "J1": dict(lib="Connector:USB_C_Receptacle_USB2.0_16P", value="USB-C", fp="Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12",
-               pins={"A1": "GND", "A12": "GND", "B1": "GND", "B12": "GND", "S1": "GND",
-                     "A4": "VBUS", "A9": "VBUS", "B4": "VBUS", "B9": "VBUS",
-                     "A5": "CC1", "B5": "CC2", "A6": "USB_DP", "B6": "USB_DP", "A7": "USB_DN", "B7": "USB_DN"},
-               fields={"Spec": "USB-C receptacle 16P, SMD + 4 shell pins", "MPN": "HRO TYPE-C-31-M-12", "LCSC": "C165948"}),
+    # USB-C for 5 V power only (no data): 6-pin receptacle, 1 mm pin pitch, easy to hand-solder.
+    "J1": dict(lib="Connector:USB_C_Receptacle_PowerOnly_6P", value="USB-C 5V",
+               fp="Connector_USB:USB_C_Receptacle_GCT_USB4125-xx-x_6P_TopMnt_Horizontal",
+               pins={"A12": "GND", "B12": "GND", "S1": "GND", "A9": "VBUS", "B9": "VBUS", "A5": "CC1", "B5": "CC2"},
+               fields={"Spec": "USB-C receptacle 6P power-only, SMD + 4 shell pins", "MPN": "GCT USB4125-GF-A"}),
     "F1": dict(lib="Device:Polyfuse", value="PTC 0.75A hold", fp="Fuse:Fuse_1206_3216Metric_Pad1.42x1.75mm_HandSolder",
                pins={"1": "VBUS", "2": "+5V"}, fields={"Spec": "PTC resettable fuse 1206, I_hold 0.75 A, >= 6 V"}),
-    "U3": dict(lib="Power_Protection:USBLC6-2SC6", value="USBLC6-2SC6", fp="Package_TO_SOT_SMD:SOT-23-6",
-               pins={"1": "USB_DP", "6": "USB_DP", "3": "USB_DN", "4": "USB_DN", "2": "GND", "5": "VBUS"},
-               fields={"Spec": "USB ESD protection SOT-23-6", "MPN": "USBLC6-2SC6", "LCSC": "C7519"}),
     "U2": dict(lib="Regulator_Linear:AP2112K-3.3", value="AP2112K-3.3", fp="Package_TO_SOT_SMD:SOT-23-5",
                pins={"1": "+5V", "3": "+5V", "2": "GND", "5": "+3V3"},
                fields={"Spec": "LDO 3.3 V 600 mA SOT-23-5", "MPN": "AP2112K-3.3TRG1", "LCSC": "C51118"}),
@@ -55,11 +52,9 @@ PARTS = {
                fields={"Spec": "IR receiver 38 kHz, pinout OUT-GND-VS (TSOP38238, VS1838B)", "MPN": "TSOP38238"}),
     "SW1": dict(lib="Switch:SW_Push", value="BOOT", fp="Button_Switch_SMD:SW_SPST_PTS810",
                 pins={"1": "IO0", "2": "GND"}, fields={"Spec": "tactile switch 4.2x3.2 mm SMD", "MPN": "C&K PTS810 SJM 250 SMTR LFS"}),
-    "SW2": dict(lib="Switch:SW_Push", value="RESET", fp="Button_Switch_SMD:SW_SPST_PTS810",
-                pins={"1": "EN", "2": "GND"}, fields={"Spec": "tactile switch 4.2x3.2 mm SMD", "MPN": "C&K PTS810 SJM 250 SMTR LFS"}),
     "J2": dict(lib="Connector_Generic:Conn_01x06", value="UART0+I2C", fp="Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical",
                pins={"1": "GND", "2": "+3V3", "3": "TXD0", "4": "RXD0", "5": "SDA", "6": "SCL"},
-               fields={"Spec": "male pin header 1x6 2.54 mm (optional)"}),
+               fields={"Spec": "male pin header 1x6 2.54 mm (UART0 for flashing and console, I2C sensor)"}),
     "R1": dict(lib="Device:R", value="10k", fp=R0603, spec="0603 1%", pins={"1": "+3V3", "2": "EN"}, fields={"LCSC": "C25804"}),
     "R2": dict(lib="Device:R", value="10k", fp=R0603, spec="0603 1%", pins={"1": "+3V3", "2": "IO0"}, fields={"LCSC": "C25804"}),
     "R3": dict(lib="Device:R", value="5.1k", fp=R0603, spec="0603 1%", pins={"1": "CC1", "2": "GND"}, fields={"LCSC": "C23186"}),

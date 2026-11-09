@@ -256,9 +256,9 @@ Mạch phát IR (dòng xung LED lớn hơn khả năng của GPIO, phải qua tr
 - Đặt đầu thu sao cho không “nhìn” thẳng LED phát (khi học, thiết bị không phát).
 
 **Mạch in riêng:** [`hardware/ac-ir-s3/`](hardware/ac-ir-s3/README.md) là bo KiCad 9 hai lớp 34 × 44 mm dùng
-ESP32-S3-WROOM-1-N16R8, cấp nguồn và nạp qua USB-C, có sẵn 2 LED IR + MOSFET, mắt thu, LED RGB, nút BOOT/RESET
-và header UART/I2C, đúng các chân mặc định ở bảng trên (không phải đổi cấu hình firmware). Kèm Gerber, BOM,
-file tọa độ linh kiện và hướng dẫn lắp ráp.
+ESP32-S3-WROOM-1-N16R8, USB-C chỉ cấp nguồn 5 V, có sẵn 2 LED IR + MOSFET, mắt thu, LED RGB, nút BOOT và header
+UART/I2C (nạp firmware bằng bộ chuyển USB-UART 3,3 V), đúng các chân mặc định ở bảng trên (không phải đổi cấu
+hình firmware). Kèm Gerber, BOM, file tọa độ linh kiện và hướng dẫn lắp ráp, nạp.
 
 ---
 

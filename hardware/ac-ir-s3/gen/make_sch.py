@@ -24,14 +24,14 @@ G = 1.27
 SCH = {
     # USB-C input
     "J1": (33.02, 50.8, 0), "R3": (58.42, 71.12, 0), "R4": (66.04, 71.12, 0),
-    "F1": (71.12, 30.48, 90), "U3": (88.9, 50.8, 0),
+    "F1": (71.12, 30.48, 90),
     # 3.3 V regulator
     "C2": (109.22, 36.83, 0), "U2": (124.46, 35.56, 0), "C1": (142.24, 36.83, 0),
     # ESP32-S3 module and decoupling
     "U1": (182.88, 99.06, 0), "C3": (203.2, 62.23, 0), "C4": (210.82, 62.23, 0),
     # Reset / boot
-    "R1": (106.68, 72.39, 0), "C5": (114.3, 83.82, 0), "SW2": (121.92, 83.82, 270),
-    "R2": (134.62, 72.39, 0), "SW1": (142.24, 88.9, 270),
+    "R1": (106.68, 72.39, 0), "C5": (114.3, 83.82, 0),
+    "R2": (134.62, 72.39, 0), "SW1": (144.78, 83.82, 270),
     # IR transmitter
     "R8": (43.18, 110.49, 0), "C8": (58.42, 110.49, 0),
     "D2": (43.18, 123.19, 90), "D3": (43.18, 135.89, 90),
@@ -49,8 +49,7 @@ SCH = {
 
 # Reference / Value positions (x, y, justify) where the defaults collide with stubs or symbols.
 FIELDS = {
-    "J1": ((20.32, 29.21, "left"), (25.4, 29.21, "left")),
-    "U3": ((81.28, 44.45, "left"), (88.9, 68.58, "center")),
+    "J1": ((22.86, 36.83, "left"), (27.94, 36.83, "left")),
     "U2": ((119.38, 25.4, "left"), (124.46, 25.4, "left")),
     "U1": ((167.64, 69.85, "left"), (196.85, 132.08, "left")),
     "Q1": ((45.72, 149.86, "left"), (45.72, 152.4, "left")),
@@ -79,9 +78,9 @@ FLAGS = {"GND": (170.18, 151.13), "VBUS": (190.5, 151.13), "+5V": (210.82, 151.1
          "LED_VDD": (231.14, 151.13), "IR_VS": (251.46, 151.13)}
 
 GROUPS = [  # title, x1, y1, x2, y2
-    ("USB-C 5 V input, ESD, PTC fuse", 12.7, 15.24, 100.33, 87.63),
+    ("USB-C 5 V input (power only), PTC fuse", 12.7, 15.24, 100.33, 87.63),
     ("3.3 V LDO (600 mA)", 101.6, 15.24, 152.4, 50.8),
-    ("Reset / BOOT", 101.6, 55.88, 154.94, 104.14),
+    ("EN power-on reset, BOOT button", 101.6, 55.88, 154.94, 108.71),
     ("ESP32-S3 module", 163.83, 50.8, 226.06, 137.16),
     ("IR transmitter (2 x 940 nm LED)", 12.7, 92.71, 76.2, 171.45),
     ("IR receiver (38 kHz, demodulating)", 77.47, 116.84, 137.16, 158.75),
@@ -91,13 +90,14 @@ GROUPS = [  # title, x1, y1, x2, y2
 ]
 
 NOTES = [
-    (102.87, 99.06, ["BOOT x2: Matter pairing", "BOOT x3: setup Wi-Fi"]),
+    (102.87, 99.06, ["BOOT x2: Matter pairing, x3: setup Wi-Fi", "Hold BOOT while plugging in USB-C:",
+                     "ROM download mode (flash via J2 UART)"]),
     (229.87, 119.38, ["1 GND  2 3V3 (out)  3 TXD0", "4 RXD0  5 SDA  6 SCL"]),
     (12.7, 177.8, [
-        "Firmware defaults (sdkconfig.defaults): IR TX = GPIO4 (active high), IR RX = GPIO5 (active low),",
-        "BOOT = GPIO0, RGB LED = GPIO48 (WS2812 protocol), local sensor I2C SDA = GPIO8, SCL = GPIO9.",
-        "N16R8: GPIO35-37 are used by the octal PSRAM and must stay unconnected.",
-        "USB-C: native USB (USB-Serial-JTAG) for flashing and logs. The REPL console is on UART0 (J2 pins 3/4).",
+        "Firmware defaults: IR TX GPIO4 (active high), IR RX GPIO5 (active low), BOOT GPIO0, RGB LED GPIO48 (WS2812),",
+        "local sensor I2C SDA GPIO8 / SCL GPIO9. N16R8: GPIO35-37 belong to the octal PSRAM, keep them unconnected.",
+        "USB-C supplies 5 V only (no data). Flashing, logs and REPL console: UART0 on J2 (TXD0/RXD0), 3.3 V USB-UART.",
+        "GPIO19/20 (native USB) unused. No reset button: EN has an RC power-on reset, unplug USB-C to reset.",
         "IR LED current: (5 V - 2 x 1.35 V) / 22 ohm = ~100 mA peak at 33 % carrier duty.",
         "U4: TSOP38238, VS1838B or any 38 kHz receiver with pinout OUT-GND-VS (check the datasheet).",
     ]),

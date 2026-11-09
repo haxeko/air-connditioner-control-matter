@@ -4,12 +4,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 P=ac_ir_s3
-REV=v1.0
+REV=v$(python3 -c "import sys; sys.path.insert(0, 'gen'); import netdef; print(netdef.REV)")
 FAB=fab
 DOC=docs
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$FAB" "$DOC"
+rm -f "$FAB/${P}"_v* "$DOC/${P}"_v*      # only the current revision is kept
 
 # Checks first: nothing is exported from a design with ERC/DRC errors.
 kicad-cli sch erc --severity-all --format report -o "$DOC/${P}_${REV}_erc.txt" "$P.kicad_sch" >/dev/null

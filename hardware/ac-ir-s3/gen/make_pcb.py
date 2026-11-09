@@ -11,6 +11,7 @@ import sys
 import pcbnew
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import netdef  # noqa: E402
 from sexp import find, first, parse  # noqa: E402
 
 FPDIR = "/usr/share/kicad/footprints"
@@ -22,12 +23,10 @@ CORNER = 1.0                    # outline corner radius
 # The module antenna overhangs the top edge (y = 0 is the module's antenna boundary).
 PLACE = {
     "U1": (17.0, 6.75, 0),
-    # left strip: 3V3 decoupling, EN RC + RESET, USB ESD
+    # left strip: 3V3 decoupling, EN power-on reset RC
     "C3": (1.8, 2.2, 90), "C4": (4.6, 2.1, 90),
     "R1": (3.0, 5.6, 0), "C5": (3.0, 7.3, 180),
-    "SW2": (3.4, 11.4, 270),
-    "U3": (3.8, 17.5, 180),
-    # USB-C on the left edge, mouth facing left
+    # USB-C (5 V power only) on the left edge, mouth facing left
     "J1": (3.2, 26.2, 270),
     # right strip: UART/I2C header
     "J2": (31.9, 3.4, 0),
@@ -49,7 +48,6 @@ PLACE = {
 
 SILK = [  # text, x, y, size, layer, justify
     ("BOOT", 32.0, 19.6, 0.8, "F.SilkS", "center"),
-    ("RST", 3.4, 15.1, 0.8, "F.SilkS", "center"),
     ("GND", 29.9, 3.4, 0.8, "F.SilkS", "right"),
     ("3V3", 29.9, 5.94, 0.8, "F.SilkS", "right"),
     ("TX", 29.9, 8.48, 0.8, "F.SilkS", "right"),
@@ -59,7 +57,7 @@ SILK = [  # text, x, y, size, layer, justify
     # bottom side, under the module (no vias there apart from the module's own thermal vias)
     ("AC IR Matter S3", 17.0, 5.0, 1.2, "B.SilkS", "center"),
     ("ESP32-S3-WROOM-1-N16R8", 17.0, 12.4, 0.8, "B.SilkS", "center"),
-    ("rev 1.0  USB-C 5V", 17.0, 13.9, 0.8, "B.SilkS", "center"),
+    ("rev %s  USB-C 5V" % netdef.REV, 17.0, 13.9, 0.8, "B.SilkS", "center"),
 ]
 
 
@@ -112,7 +110,7 @@ def add_zone(board, net, layer, priority=0):
     z.SetNet(net)
     z.SetAssignedPriority(priority)
     z.SetLocalClearance(mm(0.25))
-    z.SetMinThickness(mm(0.2))
+    z.SetMinThickness(mm(0.25))   # no copper necks narrower than 0.25 mm in the pour
     z.SetPadConnection(pcbnew.ZONE_CONNECTION_THERMAL)
     z.SetThermalReliefGap(mm(0.3))
     z.SetThermalReliefSpokeWidth(mm(0.4))
@@ -178,9 +176,6 @@ def build(netlist, out):
             n = pin_net.get((ref, pad.GetNumber()))
             if n:
                 pad.SetNet(netinfo[n])
-            if ref == "J1" and n == "GND" and pad.GetAttribute() == pcbnew.PAD_ATTRIB_SMD:
-                # narrow USB-C ground pins between signal pins: solid connection to the pour
-                pad.SetLocalZoneConnection(pcbnew.ZONE_CONNECTION_FULL)
         board.Add(fp)
         # References live on the assembly drawing (F.Fab ${REFERENCE} text); the silkscreen keeps only
         # functional labels so the compact board stays readable.
