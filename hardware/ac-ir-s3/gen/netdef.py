@@ -6,14 +6,15 @@ Net names are the names that end up in the netlist and on the board.
 
 PROJECT = "ac_ir_s3"
 TITLE = "AC IR Matter module (ESP32-S3-WROOM-1-N16R8)"
-REV = "1.1"
+REV = "1.2"
 DATE = "2026-11-09"
 COMPANY = "DIY - air-connditioner-control-matter"
+BOARD_W, BOARD_H = 30.0, 39.0   # board outline (mm)
 
 # Power nets drawn with power symbols. Every other net uses net labels.
 POWER_SYMBOLS = {"GND": "power:GND", "+3V3": "power:+3V3", "+5V": "power:+5V", "VBUS": "power:VBUS"}
 # Nets that need a PWR_FLAG (driven only by passive pins).
-PWR_FLAG_NETS = ["GND", "VBUS", "+5V", "LED_VDD", "IR_VS"]
+PWR_FLAG_NETS = ["GND", "VBUS", "PH_5V", "+5V", "LED_VDD", "IR_VS"]
 
 R0603 = "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder"
 C0603 = "Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder"
@@ -24,16 +25,26 @@ R1206 = "Resistor_SMD:R_1206_3216Metric_Pad1.30x1.75mm_HandSolder"
 PARTS = {
     "U1": dict(lib="RF_Module:ESP32-S3-WROOM-1", value="ESP32-S3-WROOM-1-N16R8", fp="RF_Module:ESP32-S3-WROOM-1",
                pins={"1": "GND", "40": "GND", "41": "GND", "2": "+3V3", "3": "EN", "27": "IO0",
-                     "4": "IR_TX", "5": "IR_RX", "12": "SDA", "17": "SCL",
-                     "25": "RGB", "36": "RXD0", "37": "TXD0"},
+                     "4": "IR_TX", "5": "IR_RX", "25": "RGB", "36": "RXD0", "37": "TXD0"},
                fields={"Spec": "Wi-Fi/BLE module, 16 MB flash, 8 MB octal PSRAM", "MPN": "ESP32-S3-WROOM-1-N16R8"}),
     # USB-C for 5 V power only (no data): 6-pin receptacle, 1 mm pin pitch, easy to hand-solder.
     "J1": dict(lib="Connector:USB_C_Receptacle_PowerOnly_6P", value="USB-C 5V",
                fp="Connector_USB:USB_C_Receptacle_GCT_USB4125-xx-x_6P_TopMnt_Horizontal",
                pins={"A12": "GND", "B12": "GND", "S1": "GND", "A9": "VBUS", "B9": "VBUS", "A5": "CC1", "B5": "CC2"},
                fields={"Spec": "USB-C receptacle 6P power-only, SMD + 4 shell pins", "MPN": "GCT USB4125-GF-A"}),
+    # 5 V from either input through its own Schottky diode (either or both may be connected, PH2.0 is
+    # reverse-polarity safe), then the PTC fuse.
+    "J2": dict(lib="Connector_Generic:Conn_01x02", value="PH2.0 5V", fp="Connector_JST:JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical",
+               pins={"1": "GND", "2": "PH_5V"},
+               fields={"Spec": "JST PH 2.0 mm 2-pin vertical, 1 = GND, 2 = +5 V", "MPN": "JST B2B-PH-K-S"}),
+    "D5": dict(lib="Device:D_Schottky", value="B5819W", fp="Diode_SMD:D_SOD-123",
+               pins={"2": "VBUS", "1": "VIN"},
+               fields={"Spec": "Schottky 1 A 40 V SOD-123 (USB-C input)", "MPN": "B5819W", "LCSC": "C8598"}),
+    "D6": dict(lib="Device:D_Schottky", value="B5819W", fp="Diode_SMD:D_SOD-123",
+               pins={"2": "PH_5V", "1": "VIN"},
+               fields={"Spec": "Schottky 1 A 40 V SOD-123 (PH2.0 input)", "MPN": "B5819W", "LCSC": "C8598"}),
     "F1": dict(lib="Device:Polyfuse", value="PTC 0.75A hold", fp="Fuse:Fuse_1206_3216Metric_Pad1.42x1.75mm_HandSolder",
-               pins={"1": "VBUS", "2": "+5V"}, fields={"Spec": "PTC resettable fuse 1206, I_hold 0.75 A, >= 6 V"}),
+               pins={"1": "VIN", "2": "+5V"}, fields={"Spec": "PTC resettable fuse 1206, I_hold 0.75 A, >= 6 V"}),
     "U2": dict(lib="Regulator_Linear:AP2112K-3.3", value="AP2112K-3.3", fp="Package_TO_SOT_SMD:SOT-23-5",
                pins={"1": "+5V", "3": "+5V", "2": "GND", "5": "+3V3"},
                fields={"Spec": "LDO 3.3 V 600 mA SOT-23-5", "MPN": "AP2112K-3.3TRG1", "LCSC": "C51118"}),
@@ -52,9 +63,12 @@ PARTS = {
                fields={"Spec": "IR receiver 38 kHz, pinout OUT-GND-VS (TSOP38238, VS1838B)", "MPN": "TSOP38238"}),
     "SW1": dict(lib="Switch:SW_Push", value="BOOT", fp="Button_Switch_SMD:SW_SPST_PTS810",
                 pins={"1": "IO0", "2": "GND"}, fields={"Spec": "tactile switch 4.2x3.2 mm SMD", "MPN": "C&K PTS810 SJM 250 SMTR LFS"}),
-    "J2": dict(lib="Connector_Generic:Conn_01x06", value="UART0+I2C", fp="Connector_PinHeader_2.54mm:PinHeader_1x06_P2.54mm_Vertical",
-               pins={"1": "GND", "2": "+3V3", "3": "TXD0", "4": "RXD0", "5": "SDA", "6": "SCL"},
-               fields={"Spec": "male pin header 1x6 2.54 mm (UART0 for flashing and console, I2C sensor)"}),
+    # Programming pads on the bottom side, 2.54 mm pitch: 3V3, TX, RX, GND, IO0 (IO0 next to GND).
+    "TP1": dict(lib="Connector:TestPoint", value="3V3", fp="TestPoint:TestPoint_Pad_1.5x1.5mm", pins={"1": "+3V3"}, fields={}),
+    "TP2": dict(lib="Connector:TestPoint", value="TX", fp="TestPoint:TestPoint_Pad_1.5x1.5mm", pins={"1": "TXD0"}, fields={}),
+    "TP3": dict(lib="Connector:TestPoint", value="RX", fp="TestPoint:TestPoint_Pad_1.5x1.5mm", pins={"1": "RXD0"}, fields={}),
+    "TP4": dict(lib="Connector:TestPoint", value="GND", fp="TestPoint:TestPoint_Pad_1.5x1.5mm", pins={"1": "GND"}, fields={}),
+    "TP5": dict(lib="Connector:TestPoint", value="IO0", fp="TestPoint:TestPoint_Pad_1.5x1.5mm", pins={"1": "IO0"}, fields={}),
     "R1": dict(lib="Device:R", value="10k", fp=R0603, spec="0603 1%", pins={"1": "+3V3", "2": "EN"}, fields={"LCSC": "C25804"}),
     "R2": dict(lib="Device:R", value="10k", fp=R0603, spec="0603 1%", pins={"1": "+3V3", "2": "IO0"}, fields={"LCSC": "C25804"}),
     "R3": dict(lib="Device:R", value="5.1k", fp=R0603, spec="0603 1%", pins={"1": "CC1", "2": "GND"}, fields={"LCSC": "C23186"}),
@@ -62,7 +76,7 @@ PARTS = {
     "R5": dict(lib="Device:R", value="100", fp=R0603, spec="0603 1%", pins={"1": "+3V3", "2": "IR_VS"}, fields={"LCSC": "C22775"}),
     "R6": dict(lib="Device:R", value="100", fp=R0603, spec="0603 1%", pins={"1": "IR_TX", "2": "IR_GATE"}, fields={"LCSC": "C22775"}),
     "R7": dict(lib="Device:R", value="10k", fp=R0603, spec="0603 1%", pins={"1": "IR_GATE", "2": "GND"}, fields={"LCSC": "C25804"}),
-    "R8": dict(lib="Device:R", value="22 1/4W", fp=R1206, spec="1206 1% 0.25 W", pins={"1": "+5V", "2": "IR_A"},
+    "R8": dict(lib="Device:R", value="18 1/4W", fp=R1206, spec="1206 1% 0.25 W", pins={"1": "+5V", "2": "IR_A"},
                fields={}),
     "R9": dict(lib="Device:R", value="100", fp=R0603, spec="0603 1%", pins={"1": "RGB", "2": "RGB_DIN"}, fields={"LCSC": "C22775"}),
     "C1": dict(lib="Device:C", value="1u", fp=C0603, spec="0603 X5R 25 V", pins={"1": "+3V3", "2": "GND"}, fields={"LCSC": "C15849"}),
@@ -73,8 +87,6 @@ PARTS = {
     "C6": dict(lib="Device:C", value="4.7u", fp=C0805, spec="0805 X5R 25 V", pins={"1": "IR_VS", "2": "GND"}, fields={"LCSC": "C1779"}),
     "C7": dict(lib="Device:C", value="100n", fp=C0603, spec="0603 X7R 50 V", pins={"1": "LED_VDD", "2": "GND"}, fields={"LCSC": "C14663"}),
     "C8": dict(lib="Device:C", value="4.7u", fp=C0805, spec="0805 X5R 25 V", pins={"1": "+5V", "2": "GND"}, fields={"LCSC": "C1779"}),
-    "H1": dict(lib="Mechanical:MountingHole", value="M2", fp="MountingHole:MountingHole_2.2mm_M2", pins={}, fields={}),
-    "H2": dict(lib="Mechanical:MountingHole", value="M2", fp="MountingHole:MountingHole_2.2mm_M2", pins={}, fields={}),
 }
 
 

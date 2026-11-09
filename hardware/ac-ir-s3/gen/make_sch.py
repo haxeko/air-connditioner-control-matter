@@ -22,14 +22,15 @@ G = 1.27
 
 # ---------------------------------------------------------------- sheet layout (x, y, rotation)
 SCH = {
-    # USB-C input
+    # Power input: USB-C or PH2.0, OR-ing Schottky diodes, PTC fuse
     "J1": (33.02, 50.8, 0), "R3": (58.42, 71.12, 0), "R4": (66.04, 71.12, 0),
-    "F1": (71.12, 30.48, 90),
+    "D5": (66.04, 30.48, 180), "D6": (66.04, 40.64, 180), "F1": (86.36, 30.48, 90),
+    "J2": (93.98, 60.96, 0),
     # 3.3 V regulator
     "C2": (109.22, 36.83, 0), "U2": (124.46, 35.56, 0), "C1": (142.24, 36.83, 0),
     # ESP32-S3 module and decoupling
     "U1": (182.88, 99.06, 0), "C3": (203.2, 62.23, 0), "C4": (210.82, 62.23, 0),
-    # Reset / boot
+    # EN power-on reset, BOOT
     "R1": (106.68, 72.39, 0), "C5": (114.3, 83.82, 0),
     "R2": (134.62, 72.39, 0), "SW1": (144.78, 83.82, 270),
     # IR transmitter
@@ -41,27 +42,32 @@ SCH = {
     # Status LED
     "D1": (238.76, 27.94, 180), "C7": (279.4, 34.29, 0),
     "R9": (243.84, 53.34, 90), "D4": (269.24, 53.34, 0),
-    # Header
-    "J2": (251.46, 104.14, 0),
-    # Mounting holes
-    "H1": (271.78, 146.05, 0), "H2": (271.78, 156.21, 0),
+    # Programming pads (bottom side of the board)
+    "TP1": (236.22, 101.6, 0), "TP2": (246.38, 101.6, 0), "TP3": (256.54, 101.6, 0),
+    "TP4": (266.7, 101.6, 0), "TP5": (276.86, 101.6, 0),
 }
 
 # Reference / Value positions (x, y, justify) where the defaults collide with stubs or symbols.
 FIELDS = {
     "J1": ((22.86, 36.83, "left"), (27.94, 36.83, "left")),
+    "J2": ((93.98, 55.88, "center"), (93.98, 67.31, "center")),
     "U2": ((119.38, 25.4, "left"), (124.46, 25.4, "left")),
     "U1": ((167.64, 69.85, "left"), (196.85, 132.08, "left")),
     "Q1": ((45.72, 149.86, "left"), (45.72, 152.4, "left")),
     "D4": ((275.59, 46.99, "left"), (254.0, 62.23, "left")),
     "C7": ((276.86, 33.02, "right"), (276.86, 35.56, "right")),
-    "J2": ((251.46, 95.25, "center"), (259.08, 104.14, "left")),
     "D2": ((52.07, 121.92, "center"), (52.07, 124.46, "center")),
     "D3": ((52.07, 134.62, "center"), (52.07, 137.16, "center")),
+    "D5": ((66.04, 26.67, "center"), (66.04, 34.29, "center")),
+    "D6": ((66.04, 36.83, "center"), (66.04, 44.45, "center")),
 }
+for _i in range(5):
+    _x = 236.22 + 10.16 * _i
+    FIELDS["TP%d" % (_i + 1)] = ((_x + 1.27, 95.25, "left"), (_x + 1.27, 97.79, "left"))
 
 # Wires between pins (straight lines through the listed points). label = (name, direction of text).
 WIRES = [
+    dict(path=[("D5", "1"), ("F1", "1")], label=("VIN", (1, 0))),
     dict(path=[("R8", "2"), ("D2", "2")], label=("IR_A", (-1, 0))),
     dict(path=[("D2", "1"), ("D3", "2")], label=("IR_M", (-1, 0))),
     dict(path=[("D3", "1"), ("Q1", "3")], label=("IR_K", (-1, 0))),
@@ -74,31 +80,32 @@ WIRES = [
 KEEP_STUB = {("U2", "1"), ("R7", "1")}
 
 # PWR_FLAG positions: flag pin at (x, y); a wire goes 10.16 mm to the right to the net's symbol/label.
-FLAGS = {"GND": (170.18, 151.13), "VBUS": (190.5, 151.13), "+5V": (210.82, 151.13),
-         "LED_VDD": (231.14, 151.13), "IR_VS": (251.46, 151.13)}
+FLAGS = {"GND": (167.64, 151.13), "VBUS": (186.69, 151.13), "PH_5V": (205.74, 151.13),
+         "+5V": (224.79, 151.13), "LED_VDD": (243.84, 151.13), "IR_VS": (262.89, 151.13)}
 
 GROUPS = [  # title, x1, y1, x2, y2
-    ("USB-C 5 V input (power only), PTC fuse", 12.7, 15.24, 100.33, 87.63),
+    ("5 V input: USB-C (power only) or PH2.0", 12.7, 15.24, 100.33, 87.63),
     ("3.3 V LDO (600 mA)", 101.6, 15.24, 152.4, 50.8),
     ("EN power-on reset, BOOT button", 101.6, 55.88, 154.94, 108.71),
     ("ESP32-S3 module", 163.83, 50.8, 226.06, 137.16),
     ("IR transmitter (2 x 940 nm LED)", 12.7, 92.71, 76.2, 171.45),
     ("IR receiver (38 kHz, demodulating)", 77.47, 116.84, 137.16, 158.75),
     ("Status LED (GPIO48)", 227.33, 15.24, 284.48, 69.85),
-    ("Header: UART0 + I2C sensor", 227.33, 82.55, 284.48, 127.0),
-    ("Power flags / mounting holes", 163.83, 139.7, 284.48, 163.83),
+    ("Programming pads (bottom side)", 227.33, 82.55, 284.48, 127.0),
+    ("Power flags", 163.83, 139.7, 284.48, 163.83),
 ]
 
 NOTES = [
-    (102.87, 99.06, ["BOOT x2: Matter pairing, x3: setup Wi-Fi", "Hold BOOT while plugging in USB-C:",
-                     "ROM download mode (flash via J2 UART)"]),
-    (229.87, 119.38, ["1 GND  2 3V3 (out)  3 TXD0", "4 RXD0  5 SDA  6 SCL"]),
+    (102.87, 99.06, ["BOOT x2: Matter pairing, x3: setup Wi-Fi", "Hold BOOT (or short IO0 to GND) at power-up:",
+                     "ROM download mode, flash through UART0 pads"]),
+    (229.87, 115.57, ["2.54 mm pitch: 3V3 TX RX GND IO0", "Short IO0 to GND at power-up to flash"]),
+    (17.78, 85.09, ["Each input has its own Schottky diode (PH2.0 reverse-polarity safe)"]),
     (12.7, 177.8, [
-        "Firmware defaults: IR TX GPIO4 (active high), IR RX GPIO5 (active low), BOOT GPIO0, RGB LED GPIO48 (WS2812),",
-        "local sensor I2C SDA GPIO8 / SCL GPIO9. N16R8: GPIO35-37 belong to the octal PSRAM, keep them unconnected.",
-        "USB-C supplies 5 V only (no data). Flashing, logs and REPL console: UART0 on J2 (TXD0/RXD0), 3.3 V USB-UART.",
-        "GPIO19/20 (native USB) unused. No reset button: EN has an RC power-on reset, unplug USB-C to reset.",
-        "IR LED current: (5 V - 2 x 1.35 V) / 22 ohm = ~100 mA peak at 33 % carrier duty.",
+        "Firmware defaults: IR TX GPIO4 (active high), IR RX GPIO5 (active low), BOOT GPIO0, RGB LED GPIO48 (WS2812).",
+        "N16R8: GPIO35-37 belong to the octal PSRAM, keep them unconnected. GPIO8/9/19/20 are unused.",
+        "USB-C and PH2.0 supply 5 V only. Flashing, logs and REPL console: UART0 pads with a 3.3 V USB-UART adapter.",
+        "No reset button: EN has an RC power-on reset, remove power to reset.",
+        "IR LED current: (5 V - 0.4 V - 2 x 1.35 V) / 18 ohm = ~100 mA peak at 33 % carrier duty.",
         "U4: TSOP38238, VS1838B or any 38 kHz receiver with pinout OUT-GND-VS (check the datasheet).",
     ]),
 ]
@@ -397,7 +404,7 @@ def build():
         pins = sym_pins(part["lib"])
         rp, vp = ref_value_positions(ref, part["lib"], at, pins)
         sh.symbol(part["lib"], ref, part["value"], at, part["fp"], netdef.fields(ref),
-                  in_bom=not ref.startswith("H"), ref_pos=rp, val_pos=vp)
+                  in_bom=not ref.startswith(("H", "TP")), ref_pos=rp, val_pos=vp)
         by_point = {}
         for num_, name, lx, ly, ang, hidden in pins:
             p = xform(at, lx, ly)

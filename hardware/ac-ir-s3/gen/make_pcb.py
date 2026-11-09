@@ -16,48 +16,53 @@ from sexp import find, first, parse  # noqa: E402
 
 FPDIR = "/usr/share/kicad/footprints"
 OX, OY = 100.0, 100.0           # board origin on the page (mm)
-W, H = 34.0, 44.0               # board size (mm)
+W, H = netdef.BOARD_W, netdef.BOARD_H
 CORNER = 1.0                    # outline corner radius
 
 # ref: (x, y, rotation in degrees CCW), board-local mm, origin = top-left corner of the board.
 # The module antenna overhangs the top edge (y = 0 is the module's antenna boundary).
 PLACE = {
-    "U1": (17.0, 6.75, 0),
-    # left strip: 3V3 decoupling, EN power-on reset RC
-    "C3": (1.8, 2.2, 90), "C4": (4.6, 2.1, 90),
-    "R1": (3.0, 5.6, 0), "C5": (3.0, 7.3, 180),
-    # USB-C (5 V power only) on the left edge, mouth facing left
-    "J1": (3.2, 26.2, 270),
-    # right strip: UART/I2C header
-    "J2": (31.9, 3.4, 0),
-    # power
-    "R3": (13.3, 21.7, 0), "F1": (13.4, 25.4, 90), "R4": (13.3, 29.2, 0),
-    "U2": (18.0, 22.8, 0), "C2": (18.0, 26.2, 0), "C1": (21.7, 22.4, 270),
-    # IR transmitter driver
-    "R6": (17.9, 29.4, 180), "R7": (17.9, 31.4, 0), "Q1": (11.2, 33.4, 270),
-    "R8": (25.6, 31.4, 0), "C8": (25.0, 33.9, 0),
-    # IR receiver supply filter
-    "R5": (18.4, 34.0, 0), "C6": (18.4, 36.6, 180),
-    # status LED and BOOT
-    "R9": (24.4, 21.2, 0), "D4": (25.4, 24.4, 180), "C7": (24.0, 27.8, 180), "D1": (28.6, 28.6, 0),
-    "R2": (29.2, 22.4, 90), "SW1": (32.0, 23.6, 90),
+    "U1": (15.0, 6.75, 0),
+    # left strip: 3V3 decoupling, LDO, EN power-on reset RC
+    "C3": (1.3, 2.3, 90), "C4": (3.55, 2.3, 90),
+    "U2": (2.6, 6.9, 90),
+    "C2": (1.3, 11.3, 90), "C1": (3.55, 11.3, 90),
+    "R1": (1.3, 15.2, 90), "C5": (3.55, 15.2, 270),     # C5 GND pad faces the free area below
+    # right strip: BOOT button and IO0 pull-up
+    "R2": (27.0, 8.6, 90), "SW1": (27.4, 16.4, 90),
+    # programming pads on the bottom side, under the module: 3V3 TX RX GND IO0
+    "TP1": (9.92, 15.6, 0), "TP2": (12.46, 15.6, 0), "TP3": (15.0, 15.6, 0),
+    "TP4": (17.54, 15.6, 0), "TP5": (20.08, 15.6, 0),
+    # power inputs: USB-C (left edge, mouth facing left) and PH2.0 (right edge)
+    "J1": (3.2, 26.2, 270), "J2": (26.4, 27.7, 90),
+    "D5": (12.4, 21.9, 180), "F1": (17.9, 21.9, 0), "D1": (22.85, 21.9, 0),
+    "R3": (9.7, 24.4, 0), "R4": (9.7, 27.6, 0),
+    "D4": (15.0, 25.6, 0), "C7": (18.9, 25.3, 90), "D6": (22.0, 25.6, 90),
+    "R9": (15.0, 29.4, 0), "R7": (9.7, 30.0, 0),
+    # IR receiver supply filter, between the IR LEDs
+    "R5": (13.1, 32.6, 0), "C6": (16.8, 33.3, 0),
+    # IR driver in the bottom corners
+    "R6": (2.3, 32.5, 0), "Q1": (2.3, 35.6, 270),
+    "R8": (26.6, 34.6, 90), "C8": (28.85, 34.6, 90),
     # bottom edge: IR LED (D3) - receiver (U4) - IR LED (D2), all facing down (+y)
-    "D3": (8.4, 37.0, 0), "U4": (14.46, 40.8, 0), "D2": (23.06, 37.0, 0),
-    "H1": (3.0, 41.0, 0), "H2": (31.0, 41.0, 0),
+    "D3": (6.62, 32.9, 0), "U4": (12.46, 36.4, 0), "D2": (20.83, 32.9, 0),
 }
+BOTTOM = {"TP1", "TP2", "TP3", "TP4", "TP5"}
 
 SILK = [  # text, x, y, size, layer, justify
-    ("BOOT", 32.0, 19.6, 0.8, "F.SilkS", "center"),
-    ("GND", 29.9, 3.4, 0.8, "F.SilkS", "right"),
-    ("3V3", 29.9, 5.94, 0.8, "F.SilkS", "right"),
-    ("TX", 29.9, 8.48, 0.8, "F.SilkS", "right"),
-    ("RX", 29.9, 11.02, 0.8, "F.SilkS", "right"),
-    ("SDA", 29.9, 13.56, 0.8, "F.SilkS", "right"),
-    ("SCL", 29.9, 16.1, 0.8, "F.SilkS", "right"),
-    # bottom side, under the module (no vias there apart from the module's own thermal vias)
-    ("AC IR Matter S3", 17.0, 5.0, 1.2, "B.SilkS", "center"),
-    ("ESP32-S3-WROOM-1-N16R8", 17.0, 12.4, 0.8, "B.SilkS", "center"),
-    ("rev %s  USB-C 5V" % netdef.REV, 17.0, 13.9, 0.8, "B.SilkS", "center"),
+    ("BOOT", 27.4, 12.4, 0.8, "F.SilkS", "center"),
+    ("5V", 26.4, 22.55, 0.8, "F.SilkS", "center"),       # above the PH2.0 5 V pin
+    ("5V", 28.8, 25.7, 0.8, "B.SilkS", "center"),        # PH2.0 pins, bottom side
+    ("GND", 28.8, 27.7, 0.8, "B.SilkS", "center"),
+    # bottom side: programming pad names and board name (under the module: no vias there)
+    ("3V3", 9.92, 13.9, 0.8, "B.SilkS", "center"),
+    ("TX", 12.46, 13.9, 0.8, "B.SilkS", "center"),
+    ("RX", 15.0, 13.9, 0.8, "B.SilkS", "center"),
+    ("GND", 17.54, 13.9, 0.8, "B.SilkS", "center"),
+    ("IO0", 20.08, 13.9, 0.8, "B.SilkS", "center"),
+    ("AC IR Matter S3", 15.0, 2.6, 1.2, "B.SilkS", "center"),
+    ("ESP32-S3-WROOM-1-N16R8", 15.0, 4.4, 0.8, "B.SilkS", "center"),
+    ("rev %s  5V USB-C / PH2.0" % netdef.REV, 15.0, 5.9, 0.8, "B.SilkS", "center"),
 ]
 
 
@@ -177,6 +182,9 @@ def build(netlist, out):
             if n:
                 pad.SetNet(netinfo[n])
         board.Add(fp)
+        if ref in BOTTOM:                   # programming pads: flip to the bottom side
+            fp.Flip(pt(x, y), pcbnew.FLIP_DIRECTION_LEFT_RIGHT)
+            fp.SetPosition(pt(x, y))
         # References live on the assembly drawing (F.Fab ${REFERENCE} text); the silkscreen keeps only
         # functional labels so the compact board stays readable.
         fp.Reference().SetVisible(False)

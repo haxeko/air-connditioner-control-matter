@@ -24,8 +24,13 @@ import time
 import numpy as np
 import pcbnew
 
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import netdef  # noqa: E402
+from make_pcb import PLACE  # noqa: E402
+
 OX, OY = 100.0, 100.0
-W, H = 34.0, 44.0
+W, H = netdef.BOARD_W, netdef.BOARD_H
 CORNER = 1.0
 G = 0.05                        # grid pitch (mm)
 NX = int(round(W / G)) + 1
@@ -35,23 +40,26 @@ CLEAR = 0.2                     # copper clearance (mm)
 EDGE = 0.3                      # copper to board edge (mm)
 MARGIN = 0.03                   # grid discretisation margin (mm)
 CLASSES = {"Default": dict(w=0.25, via=0.6, drill=0.3), "Power": dict(w=0.5, via=0.8, drill=0.4)}
-POWER_NETS = {"VBUS", "+5V", "+3V3", "/IR_A", "/IR_M", "/IR_K"}
+POWER_NETS = {"VBUS", "/PH_5V", "/VIN", "+5V", "+3V3", "/IR_A", "/IR_M", "/IR_K"}
 LAYER_COST = (1.0, 1.5)         # prefer the top layer: the bottom layer is the GND plane
 VIA_COST = 40.0                 # in grid steps
 TURN_COST = 0.4
 PRES0, PRES_MULT, HIST_INC = 0.6, 1.7, 1.5
 MAX_ITER = 40
 # Areas where a component body sits on the top copper: no top-layer tracks or vias there.
-NO_TOP = [(9.0, -1.0, 25.0, 18.5),      # ESP32-S3 module body inside its pad ring
-          (-1.0, 21.68, 5.6, 30.72)]    # USB-C metal shell (pads start at x = 5.68)
-ORDER = ["/CC1", "/CC2", "VBUS", "/EN", "/IR_TX", "/IR_RX", "/SDA", "/SCL",
-         "+5V", "/IR_A", "/IR_M", "/IR_K", "+3V3", "/IO0", "/IR_GATE", "/IR_VS",
+_ux, _uy, _ = PLACE["U1"]
+_jx, _jy, _ = PLACE["J1"]
+NO_TOP = [(_ux - 8.0, -1.0, _ux + 8.0, _uy + 11.75),        # module body inside its pad ring
+          (-1.0, _jy - 4.52, _jx + 2.4, _jy + 4.52)]         # USB-C shell (pads start at x + 2.48)
+ORDER = ["/CC1", "/CC2", "VBUS", "/PH_5V", "/VIN", "+5V", "/EN", "/IR_TX", "/IR_RX",
+         "/IR_A", "/IR_M", "/IR_K", "+3V3", "/IO0", "/IR_GATE", "/IR_VS",
          "/RGB", "/RGB_DIN", "/LED_VDD", "/TXD0", "/RXD0"]
 
 # Pad order for nets whose tree should start at the source and reach the main load first.
-PAD_ORDER = {"+3V3": [("U2", "5"), ("C1", "1"), ("U1", "2"), ("C4", "1"), ("C3", "1")],
+PAD_ORDER = {"+3V3": [("U2", "5"), ("C3", "1"), ("U1", "2"), ("C4", "1")],
              "+5V": [("F1", "2"), ("C2", "1"), ("U2", "1")],
-             "VBUS": [("J1", "A9"), ("F1", "1")]}
+             "/VIN": [("F1", "1"), ("D5", "1"), ("D6", "1")],
+             "VBUS": [("D5", "2"), ("J1", "B9"), ("J1", "A9")]}
 
 XS = np.arange(NX) * G
 YS = np.arange(NY) * G
@@ -489,11 +497,30 @@ class Router:
                 failed.append(net)
         return failed
 
-    def gnd_drops(self):
-        """Short track + via from every surface-mount GND pad on the top layer into the bottom pour."""
+    def gnd_copper(self, layer, window):
+        """GND vias and plated GND pads touching 'layer' inside the window: (cells inside them, via centres)."""
+        i0, i1, j0, j1 = window
+        cells, centres = set(), []
+        items = [it for it, obj in self.routed.get("GND", []) if it.kind == "circle"]
+        centres = [(it.geo[0], it.geo[1]) for it in items]
+        items += [it for it in self.pads.get("GND", []) if it.pad.GetAttribute() == pcbnew.PAD_ATTRIB_PTH]
+        for it in items:
+            if layer not in it.layers:
+                continue
+            for l, flat in it.cells(0, [layer]).items():
+                for c in flat:
+                    i, j = int(c) % NX, int(c) // NX
+                    if i0 <= i <= i1 and j0 <= j <= j1:
+                        cells.add(layer * NC + int(c))
+        return cells, centres
+
+    def gnd_drops(self, reach=3.5, via_gap=0.9):
+        """Every surface-mount GND pad on the top layer gets a short track to a via into the bottom pour
+        (a new via, or an existing GND via / plated GND pad nearby)."""
         k = "Default"
         w = CLASSES[k]["w"]
-        placed = failed = 0
+        vr = CLASSES[k]["via"] / 2
+        placed = shared = failed = 0
         seen = set()
         for it in self.pads.get("GND", []):
             pad = it.pad
@@ -511,25 +538,56 @@ class Router:
                 continue                     # connector GND pins: tied by its plated shell pins and the pour
             tblock, vblock = self.maps.hard("GND", k, dyn_hard=True)
             src = set(l * NC + c for l, c in self.allowed_cells(it, w) if l == 0)
-            for s in src:
-                tblock[0].ravel()[s] = False
-            i0, i1, j0, j1 = it.window(2.5)
+            for s_ in src:
+                tblock[0].ravel()[s_] = False
+            win = it.window(reach)
+            i0, i1, j0, j1 = win
             X, Y = np.meshgrid(XS[i0:i1 + 1], YS[j0:j1 + 1])
             d = it.dist(X, Y)
-            near = (d > CLASSES[k]["via"] / 2) & (d < 2.5)
-            busy = vblock[j0:j1 + 1, i0:i1 + 1] | tblock[0][j0:j1 + 1, i0:i1 + 1] | tblock[1][j0:j1 + 1, i0:i1 + 1]
-            jj, ii = np.nonzero(near & ~busy)
-            targets = set(int((j + j0) * NX + (i + i0)) for j, i in zip(jj, ii))
-            path = astar(src, targets, tblock, vblock, (i0, i1, j0, j1)) if targets else None
+            ok = (d > vr) & (d < reach)
+            ok &= ~(vblock[j0:j1 + 1, i0:i1 + 1] | tblock[0][j0:j1 + 1, i0:i1 + 1] | tblock[1][j0:j1 + 1, i0:i1 + 1])
+            old, centres = self.gnd_copper(0, win)
+            for cx, cy in centres:           # keep new vias apart from existing GND vias
+                ok &= np.hypot(X - cx, Y - cy) >= via_gap
+            jj, ii = np.nonzero(ok)
+            new_t = set(int((j + j0) * NX + (i + i0)) for j, i in zip(jj, ii))
+            no_via = np.ones_like(vblock)    # the track itself stays on the top layer
+            path = astar(src, new_t | old, tblock, no_via, win) if (new_t or old) else None
             if not path:
                 print("  no room for a GND via at %s.%s" % (ref, pad.GetNumber()))
                 failed += 1
                 continue
-            end = path[-1] % NC
+            end = path[-1]
             self.emit("GND", path, k)
-            self.add_via("GND", ((end % NX) * G, (end // NX) * G), k)
-            placed += 1
-        print("GND drop vias: %d placed, %d without room" % (placed, failed))
+            if end in old:
+                shared += 1
+            else:
+                c = end % NC
+                self.add_via("GND", ((c % NX) * G, (c // NX) * G), k)
+                placed += 1
+        print("GND drop vias: %d new, %d pads joined to an existing GND via, %d without room" % (placed, shared, failed))
+
+    def gnd_bottom_links(self, reach=12.0):
+        """Surface-mount GND pads on the bottom layer (programming pad): bottom track to GND copper."""
+        k = "Default"
+        w = CLASSES[k]["w"]
+        for it in self.pads.get("GND", []):
+            if it.pad.GetAttribute() != pcbnew.PAD_ATTRIB_SMD or it.layers != [1]:
+                continue
+            tblock, vblock = self.maps.hard("GND", k, dyn_hard=True)
+            vblock[:] = True                 # stay on the bottom layer
+            src = set(l * NC + c for l, c in self.allowed_cells(it, w))
+            for s_ in src:
+                tblock[1].ravel()[s_ % NC] = False
+            win = it.window(reach)
+            targets, _ = self.gnd_copper(1, win)
+            path = astar(src, targets, tblock, vblock, win) if targets else None
+            ref = it.pad.GetParentFootprint().GetReference()
+            if path:
+                self.emit("GND", path, k)
+                print("bottom GND link: %s.%s" % (ref, it.pad.GetNumber()))
+            else:
+                print("  no bottom GND link for %s.%s" % (ref, it.pad.GetNumber()))
 
 
 def main(path):
@@ -542,6 +600,7 @@ def main(path):
         raise SystemExit("nets not in ORDER: %s" % missing)
     failed = r.negotiate(ORDER)
     r.gnd_drops()
+    r.gnd_bottom_links()
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())
     pcbnew.SaveBoard(path, board)
     print("saved %s; unrouted nets: %s" % (path, failed or "none"))

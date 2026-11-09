@@ -3,7 +3,7 @@
 import json
 import sys
 
-POWER_NETS = ["VBUS", "+5V", "+3V3", "/IR_A", "/IR_M", "/IR_K"]
+POWER_NETS = ["VBUS", "/PH_5V", "/VIN", "+5V", "+3V3", "/IR_A", "/IR_M", "/IR_K"]
 
 
 def patch(path):
@@ -11,7 +11,8 @@ def patch(path):
     ds = d["board"]["design_settings"]
     ds["rules"].update({
         "min_clearance": 0.2,
-        "min_connection": 0.2,
+        # narrow necks in the GND pours are allowed down to 0.15 mm (every GND pad also has its own via)
+        "min_connection": 0.15,
         "min_copper_edge_clearance": 0.3,
         "min_hole_clearance": 0.2,
         "min_hole_to_hole": 0.25,
