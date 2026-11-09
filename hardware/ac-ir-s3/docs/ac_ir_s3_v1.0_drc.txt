@@ -1,0 +1,11 @@
+** Drc report for ac_ir_s3.kicad_pcb **
+** Created on 2026-11-09T10:21:59+0000 **
+** Report includes: Errors, Warnings, Exclusions **
+
+** Found 0 DRC violations **
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** End of Report **

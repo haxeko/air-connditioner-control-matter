@@ -1,0 +1,8 @@
+*.kicad_prl
+*-backups/
+fp-info-cache
+\#auto_saved_files\#
+gen/*.net
+gen/*.rpt
+gen/drc.json
+gen/__pycache__/
