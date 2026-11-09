@@ -29,7 +29,7 @@ function check(cond, what) {
   try {
     await page.goto(base);
     await page.waitForFunction(() => document.getElementById('ov-temp').textContent !== '--');
-    check((await txt('#dev-name')) === 'May lanh IR v1.2.0', 'versioned device name from /api/session');
+    check((await txt('#dev-name')) === 'May lanh IR v1.3.0', 'versioned device name from /api/session');
     check(await page.locator('#banner-test').isVisible(), 'test-mode banner shown');
     check((await txt('#ov-temp')) === 'Không khả dụng', 'no sensor -> temperature unavailable (not invented)');
     check((await txt('#portal-left')).startsWith('Tự tắt sau'), 'portal countdown');
@@ -59,11 +59,11 @@ function check(cond, what) {
     await page.click('#hm-show');
     await page.waitForSelector('#hm-qr svg path');
     check((await txt('#hm-manual')) === '3497-011-2332', 'manual code formatted');
-    check((await txt('#hm-product')) === 'May lanh IR v1.2.0', 'Matter product name with version suffix');
+    check((await txt('#hm-product')) === 'May lanh IR v1.3.0', 'Matter product name with version suffix');
     check((await txt('#hm-ble')).startsWith('sẵn sàng'), 'BLE ready while the window is closed');
     await page.click('#hm-open');
     await page.waitForFunction(() => document.getElementById('hm-window').textContent.startsWith('Đang bật'));
-    await page.waitForFunction(() => document.getElementById('hm-ble').textContent.includes('AC-1A2B-v1.2.0'));
+    await page.waitForFunction(() => document.getElementById('hm-ble').textContent.includes('AC-1A2B-v1.3.0'));
     check((await txt('#hm-ble')).startsWith('đang phát'), 'BLE advertising while the window is open');
     check((await page.locator('#hm-print').isVisible()), 'printable pairing label offered');
     check(true, 'commissioning window opened');
@@ -112,6 +112,27 @@ function check(cond, what) {
     await page.click('#ctl-form button[type=submit]');
     await page.waitForSelector('#toast:not(.error)');
     check(true, 'manual control sent through the thermostat');
+
+    // ---------------------------------------------------------------- Remote recognition (IR library)
+    await page.click('#det-start');
+    await page.waitForSelector('#det-result:not([hidden])', { timeout: 12000 });
+    check((await txt('#det-proto')).startsWith('DAIKIN (280 bit)'), 'remote recognised as DAIKIN');
+    check((await txt('#det-state')).startsWith('Lạnh 25'), 'decoded state shown');
+    check(!(await page.locator('#det-model-wrap').isVisible()), 'no model choice for a single-model protocol');
+    check((await page.locator('#det-t-fan option').count()) === 4, 'test fan list = Auto + 3 levels');
+    await page.selectOption('#det-levels', '5');
+    check((await page.locator('#det-t-fan option').count()) === 6, 'fan list follows the number of levels');
+    await page.click('#det-test');
+    await page.waitForFunction(() => document.getElementById('toast').textContent.startsWith('Đã phát thử'));
+    check(true, 'library test command sent');
+    await page.fill('#det-name', 'Daikin phòng khách');
+    await page.click('#det-save');
+    await page.waitForFunction(() => document.getElementById('ac-profiles').textContent.includes('thư viện DAIKIN'));
+    check(true, 'library profile saved and listed');
+    await page.waitForSelector('#ace-lib:not([hidden])');
+    check((await txt('#ace-lib')).includes('5 mức quạt'), 'library settings shown on the profile');
+    check(!(await page.locator('#learn-card').isVisible()), 'no learning on a library profile');
+    await shot('06b-detect');
 
     // ---------------------------------------------------------------- Algorithm
     await page.click('#tabs button[data-page=algo]');

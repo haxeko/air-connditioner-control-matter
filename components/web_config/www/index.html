@@ -264,6 +264,61 @@
     <button id="ac-restart-btn" class="btn small" type="button">Khởi động lại để áp dụng</button>
   </div>
   <div class="grid">
+    <div class="card" id="det-card">
+      <h2>Nhận diện remote tự động</h2>
+      <ol class="steps">
+        <li>Bấm “Bắt đầu nhận diện”, hướng remote máy lạnh vào mắt thu (5–30 cm) và bấm một nút, ví dụ tăng/giảm nhiệt độ.</li>
+        <li>Kiểm tra trạng thái đọc được có khớp màn hình remote; chọn model nếu được hỏi.</li>
+        <li>Phát thử vài lệnh. Máy lạnh phản hồi đúng thì lưu: không cần học từng lệnh.</li>
+      </ol>
+      <div class="row">
+        <button id="det-start" class="btn primary" type="button">Bắt đầu nhận diện</button>
+        <button id="det-cancel" class="btn" type="button">Hủy</button>
+      </div>
+      <div id="det-status" class="info" hidden></div>
+      <div id="det-fail" class="warn" hidden></div>
+      <div id="det-result" hidden>
+        <dl class="kv">
+          <dt>Giao thức</dt><dd id="det-proto">-</dd>
+          <dt>Trạng thái đọc được</dt><dd id="det-state">-</dd>
+        </dl>
+        <form id="det-form" class="form">
+          <label id="det-model-wrap">Model remote<select name="model" id="det-model"></select></label>
+          <label>Số mức quạt trên remote (ngoài Tự động)<select name="fan_levels" id="det-levels">
+            <option value="2">2 mức</option><option value="3" selected>3 mức</option><option value="4">4 mức</option><option value="5">5 mức</option>
+          </select></label>
+          <div class="form">
+            <span class="small muted">Chế độ máy lạnh có (Làm lạnh luôn có)</span>
+            <label class="check"><input type="checkbox" id="det-m-heat"> Sưởi</label>
+            <label class="check"><input type="checkbox" id="det-m-dry" checked> Hút ẩm (khô)</label>
+            <label class="check"><input type="checkbox" id="det-m-fan" checked> Chỉ quạt</label>
+            <label class="check"><input type="checkbox" id="det-m-auto"> Tự động</label>
+            <label class="check"><input type="checkbox" id="det-swing" checked> Remote có nút đảo gió</label>
+          </div>
+          <label>Nhiệt độ thấp nhất<select name="tmin_half" id="det-tmin"></select></label>
+          <label>Nhiệt độ cao nhất<select name="tmax_half" id="det-tmax"></select></label>
+          <label>Bước nhiệt độ<select name="step" id="det-step"><option value="2">1 °C</option><option value="1">0,5 °C</option></select></label>
+          <h3>Phát thử</h3>
+          <div class="row">
+            <select id="det-t-mode" aria-label="Chế độ thử"></select>
+            <select id="det-t-temp" aria-label="Nhiệt độ thử"></select>
+            <select id="det-t-fan" aria-label="Quạt thử"></select>
+            <select id="det-t-swing" aria-label="Đảo gió thử"></select>
+          </div>
+          <div class="row">
+            <button id="det-test" class="btn" type="button">Phát thử</button>
+            <button id="det-test-off" class="btn" type="button">Phát lệnh Tắt</button>
+          </div>
+          <h3>Lưu thành profile</h3>
+          <label>Ô lưu<select name="slot" id="det-slot"></select></label>
+          <label>Tên<input name="name" id="det-name" maxlength="31" required></label>
+          <div class="row"><button id="det-save" class="btn primary" type="submit">Lưu và dùng profile này</button></div>
+          <p id="det-noslot" class="warn" hidden>Hết ô trống: mở khóa và xóa một profile trước khi lưu.</p>
+        </form>
+      </div>
+      <p class="note">Dùng thư viện IRremoteESP8266 (hơn 80 giao thức máy lạnh: Daikin, Panasonic, LG, Samsung, Mitsubishi, Toshiba, Gree, Midea, Fujitsu, Sharp, Hitachi…). Không nhận ra hoặc máy không phản hồi lệnh thử thì dùng “Học lệnh IR” (học từng lệnh) như trước.</p>
+    </div>
+
     <div class="card">
       <h2>Profile máy lạnh</h2>
       <div id="ac-ready"></div>
@@ -281,7 +336,7 @@
         <label>Sóng mang (Hz, 0 = mặc định)<input name="carrier" type="number" min="0" max="60000" value="0"></label>
         <div class="row"><button class="btn primary" type="submit">Lưu</button></div>
       </form>
-      <p class="note">Firmware chỉ phát lại lệnh đã học từ remote gốc (raw IR), không tự tạo mã cho hãng máy lạnh. Sóng mang mặc định 38 kHz; đầu thu IR thông thường đã giải điều chế nên không đo được sóng mang gốc.</p>
+      <p class="note">Hai loại profile: <b>thư viện</b> (tạo bằng “Nhận diện remote tự động”, firmware tự sinh mọi lệnh theo giao thức của remote) và <b>học thủ công</b> (phát lại đúng các lệnh đã học từ remote gốc). Sóng mang mặc định 38 kHz; đầu thu IR thông thường đã giải điều chế nên không đo được sóng mang gốc.</p>
     </div>
 
     <div class="card" id="ace-card" hidden>
@@ -300,8 +355,11 @@
         <button id="ace-lock" class="btn primary" type="button">Khóa profile</button>
         <button id="ace-delete" class="btn danger" type="button">Xóa profile</button>
       </div>
-      <h3>Lệnh đã học (<span id="ace-count">0</span>)</h3>
-      <ul id="ace-codes" class="list codes"></ul>
+      <div id="ace-lib" class="info" hidden></div>
+      <div id="ace-codes-wrap">
+        <h3>Lệnh đã học (<span id="ace-count">0</span>)</h3>
+        <ul id="ace-codes" class="list codes"></ul>
+      </div>
       <p class="note">Sau khi phát thử, trạng thái thật của máy lạnh có thể khác trạng thái thermostat: bấm “Gửi lại trạng thái hiện tại” ở phần Điều khiển.</p>
     </div>
 
@@ -348,7 +406,7 @@
         <dt>Đang chờ phát</dt><dd id="ctl-pending">-</dd>
       </dl>
       <div id="ctl-error" class="err" hidden></div>
-      <p class="note">Lệnh đi qua thermostat Matter nên ứng dụng nhà cũng thấy thay đổi. Chỉ phát được tổ hợp đã học; nếu chưa học đúng nhiệt độ, thiết bị dùng nhiệt độ đã học gần nhất cùng chế độ (không bao giờ đổi sang chế độ khác).</p>
+      <p class="note">Lệnh đi qua thermostat Matter nên ứng dụng nhà cũng thấy thay đổi. Profile thư viện tạo được mọi tổ hợp trong cấu hình của nó. Profile học thủ công chỉ phát được tổ hợp đã học; nếu chưa học đúng nhiệt độ, thiết bị dùng nhiệt độ đã học gần nhất cùng chế độ (không bao giờ đổi sang chế độ khác).</p>
     </div>
   </div>
 </section>

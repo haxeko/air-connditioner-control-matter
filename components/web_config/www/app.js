@@ -32,7 +32,8 @@
   let timer = null;
   let closed = false;
   let fast = false;
-  const st = { ac: null, editSlot: null, codesSlot: null, codes: [], learnSession: 0, sensor: null, dirty: {} };
+  const st = { ac: null, editSlot: null, codesSlot: null, codes: [], learnSession: 0, sensor: null, dirty: {},
+    detecting: false, detectSession: 0, detect: null };
 
   /* ------------------------------------------------------------------ helpers */
   function el(tag, attrs, ...kids) {
@@ -243,7 +244,8 @@
     text('ov-desired', c.desired ? c.desired.desc : '-');
     text('ov-control', c.control_mode === 1 ? 'Theo cảm biến ngoài' + (c.compensating ? ' (bù ' + signed(c.offset) + ')' : '') : 'Direct');
     text('ov-reason', c.reason_text);
-    text('ov-profile', p.slot >= 0 ? p.name + ' · ' + p.codes + ' lệnh · ' + (p.locked ? 'đã khóa' : 'chưa khóa') : 'Chưa có');
+    text('ov-profile', p.slot >= 0 ? p.name + ' · ' + (p.library ? 'thư viện ' + p.library : p.codes + ' lệnh') + ' · ' +
+      (p.locked ? 'đã khóa' : 'chưa khóa') : 'Chưa có');
     msgbox('ov-notready', c.ready ? '' : 'Chưa điều khiển tự động: ' + (c.not_ready || 'profile chưa sẵn sàng'));
     text('ov-ir-label', ir.last_age_s == null ? 'Chưa phát lệnh nào' : ir.last_label);
     text('ov-ir-age', ir.last_age_s == null ? 'chưa' : fmtAge(ir.last_age_s) + ' (' + (IR_SOURCES[ir.last_source] || '') + ')');
@@ -579,7 +581,7 @@
         },
           el('td', null, String(p.slot + 1)),
           el('td', null, p.present ? p.name : el('span', { class: 'muted' }, 'trống')),
-          el('td', null, p.present ? String(p.codes) : ''),
+          el('td', null, p.present ? (p.lib ? 'thư viện ' + p.lib.protocol_name : String(p.codes)) : ''),
           el('td', null, p.present ? (p.slot === j.active ? 'đang dùng · ' : '') + (p.locked ? 'đã khóa' : 'chưa khóa') : ''))));
 
     const empty = j.profiles.filter((p) => !p.present);
@@ -588,14 +590,25 @@
 
     const p = editProfile();
     show('ace-card', !!(p && p.present));
-    show('learn-card', !!(p && p.present && !p.locked));
+    show('learn-card', !!(p && p.present && !p.locked && !p.lib));
     if (p && p.present) {
       text('ace-title', p.name);
       const info = $('ace-lockinfo');
       info.className = p.locked ? 'info' : 'warn';
-      info.textContent = p.locked
-        ? 'Đã khóa: chỉ phát các lệnh đã học, không học/xóa thêm. Mở khóa để sửa.'
-        : 'Chưa khóa: điều khiển tự động chưa dùng profile này. Học ít nhất lệnh Tắt và một lệnh Làm lạnh, phát thử, rồi khóa để xác nhận.';
+      info.textContent = p.lib
+        ? (p.locked ? 'Đã khóa: điều khiển tự động dùng profile này.' : 'Chưa khóa: điều khiển tự động chưa dùng profile này.')
+        : p.locked
+          ? 'Đã khóa: chỉ phát các lệnh đã học, không học/xóa thêm. Mở khóa để sửa.'
+          : 'Chưa khóa: điều khiển tự động chưa dùng profile này. Học ít nhất lệnh Tắt và một lệnh Làm lạnh, phát thử, rồi khóa để xác nhận.';
+      show('ace-lib', !!p.lib);
+      show('ace-codes-wrap', !p.lib);
+      if (p.lib) {
+        const L = p.lib;
+        const modes = AC_MODES.filter((_, i) => L.modes & (1 << i)).join(', ');
+        text('ace-lib', 'Lệnh được tạo tự động theo giao thức ' + L.protocol_name + (L.model_name ? ' (model ' + L.model_name + ')' : '') +
+          ': ' + modes + '; ' + fmtHalf(L.tmin_half) + '–' + fmtHalf(L.tmax_half) + '; ' + L.fan_levels + ' mức quạt' +
+          (L.swing ? ', có đảo gió' : '') + '. Muốn đổi cấu hình: mở khóa, xóa và nhận diện lại.');
+      }
       const f = $('ace-form').elements;
       if (!isDirty('ace-form')) {
         f.name.value = p.name;
@@ -605,6 +618,7 @@
         f.carrier.value = String(p.carrier_hz);
       }
       for (const e of $('ace-form').querySelectorAll('input, select, button')) e.disabled = p.locked;
+      $('ace-form').elements.carrier.disabled = p.locked || !!p.lib; /* a library protocol has its own carrier */
       show('ace-select', p.slot !== j.active);
       $('ace-lock').textContent = p.locked ? 'Mở khóa' : 'Khóa profile';
       $('ace-delete').disabled = p.locked;
@@ -624,8 +638,9 @@
     ls.className = l.state === 4 ? 'err' : 'info';
     ls.textContent = LEARN_STATES[l.state] + (l.message ? ': ' + l.message : '') +
       (l.state === 3 ? ' (' + l.segments + ' đoạn, ' + l.levels + ' xung, ' + l.duration_ms + ' ms)' : '');
-    show('learn-result', l.state === 3);
+    show('learn-result', l.state === 3 && !st.detecting);
     st.learnSession = l.session;
+    renderDetect(j, l);
     $('learn-start').disabled = learning;
     $('learn-cancel').disabled = !learning;
     if (learning) fast = true;
@@ -705,6 +720,130 @@
     if (j) {
       toast('Đã lưu lệnh: ' + j.state.desc);
       st.codesSlot = null;
+    }
+  });
+
+  /* ------------------------------------------------------------------ remote recognition */
+  function detectLib() {
+    const d = st.detect;
+    const body = { protocol: d.protocol, model: $('det-model').value || -1, fan_levels: $('det-levels').value };
+    return body;
+  }
+  function detectModes() {
+    let m = 1 << 0; /* cool */
+    if ($('det-m-heat').checked) m |= 1 << 1;
+    if ($('det-m-dry').checked) m |= 1 << 2;
+    if ($('det-m-fan').checked) m |= 1 << 3;
+    if ($('det-m-auto').checked) m |= 1 << 4;
+    return m;
+  }
+  function fillDetectTest() {
+    const levels = +$('det-levels').value;
+    const modes = detectModes();
+    const ms = AC_MODES.map((n, i) => [i, n]).filter(([i]) => modes & (1 << i));
+    fillSelect($('det-t-mode'), ms, $('det-t-mode').value || (st.detect && st.detect.state ? st.detect.state.mode : 0));
+    const temps = learnTempOptions(+$('det-step').value);
+    fillSelect($('det-t-temp'), temps, nearest(temps, $('det-t-temp').value ? +$('det-t-temp').value : 52));
+    const fans = AC_FANS.map((n, i) => [i, n]).filter(([i]) => i === 0 || (i >= 1 && i <= levels));
+    fillSelect($('det-t-fan'), fans, $('det-t-fan').value || 0);
+    fillSelect($('det-t-swing'), SWINGS.map((n, i) => [i, n]).filter(([i]) => i === 0 || $('det-swing').checked), $('det-t-swing').value || 0);
+    $('det-t-temp').hidden = +$('det-t-mode').value === AC_MODE_FAN;
+  }
+  function showDetect(d) {
+    st.detect = d;
+    const ok = d.recognized && d.supported;
+    show('det-result', ok);
+    const fail = $('det-fail');
+    fail.hidden = ok;
+    fail.textContent = !d.recognized
+      ? 'Không nhận ra giao thức của remote này. Bấm nhận diện lại với nút khác; vẫn không được thì dùng “Học lệnh IR” bên dưới.'
+      : 'Nhận ra tín hiệu ' + d.protocol_name + ' nhưng đây không phải giao thức máy lạnh mà thư viện tạo lệnh được (thường là remote TV/quạt). Dùng “Học lệnh IR”.';
+    if (!ok) return;
+    text('det-proto', d.protocol_name + ' (' + d.bits + ' bit)' + (d.model_name ? ', model ' + d.model_name : ''));
+    text('det-state', d.has_state ? stateDesc(d.state) + (d.fan_label ? ' (quạt trong mã: ' + d.fan_label + ')' : '') : 'không đọc được');
+    show('det-model-wrap', d.models.length > 0);
+    fillSelect($('det-model'), d.models.map((m) => [m.model, m.name]), d.model > 0 ? d.model : d.models.length ? d.models[0].model : null);
+    $('det-m-heat').checked = !!(d.has_state && d.state.mode === 1);
+    const temps = learnTempOptions(1);
+    fillSelect($('det-tmin'), temps, 32);
+    fillSelect($('det-tmax'), temps, 60);
+    if (d.has_state && d.state.temp_half) $('det-t-temp').value = '';
+    $('det-name').value = d.protocol_name.slice(0, 31);
+    $('det-t-mode').value = '';
+    fillDetectTest();
+    if (d.has_state && d.state.power && d.state.temp_half) {
+      $('det-t-mode').value = String(d.state.mode);
+      $('det-t-temp').value = String(d.state.temp_half);
+    }
+  }
+  function renderDetect(j, l) {
+    const ds = $('det-status');
+    if (st.detecting) {
+      ds.hidden = false;
+      ds.className = l.state === 4 ? 'err' : 'info';
+      ds.textContent = l.state === 4 ? 'Không thu được tín hiệu: ' + (l.message || '') : l.state === 3 ? 'Đang phân tích…' : 'Hướng remote vào mắt thu và bấm một nút';
+      if (l.state === 4 || l.state === 5) st.detecting = false;
+      if (l.state === 3 && l.session !== st.detectSession) {
+        st.detectSession = l.session;
+        st.detecting = false;
+        act('ac/detect/analyze', { session: l.session }, null).then((r) => {
+          ds.hidden = true;
+          if (r) showDetect(r.detect);
+        });
+      }
+    }
+    $('det-start').disabled = st.detecting;
+    $('det-cancel').disabled = !st.detecting;
+    const empty = j.profiles.filter((p) => !p.present);
+    if (!isDirty('det-form')) fillSelect($('det-slot'), empty.map((p) => [p.slot, 'Ô ' + (p.slot + 1)]));
+    $('det-save').disabled = empty.length === 0;
+    show('det-noslot', empty.length === 0);
+  }
+  function detectTestBody(power) {
+    const b = detectLib();
+    b.power = power;
+    if (power) {
+      b.mode = $('det-t-mode').value;
+      b.fan = $('det-t-fan').value;
+      b.swing = $('det-t-swing').value;
+      if (+b.mode !== AC_MODE_FAN) b.temp_half = $('det-t-temp').value;
+    }
+    return b;
+  }
+  $('det-start').addEventListener('click', async () => {
+    st.detect = null;
+    show('det-result', false);
+    show('det-fail', false);
+    if (await act('ac/learn/start', {}, 'Bộ thu đã sẵn sàng: hướng remote vào mắt thu và bấm một nút')) st.detecting = true;
+  });
+  $('det-cancel').addEventListener('click', () => {
+    st.detecting = false;
+    act('ac/learn/cancel', {}, null);
+  });
+  for (const id of ['det-levels', 'det-m-heat', 'det-m-dry', 'det-m-fan', 'det-m-auto', 'det-swing', 'det-step', 'det-t-mode']) {
+    $(id).addEventListener('change', fillDetectTest);
+  }
+  $('det-test').addEventListener('click', () => {
+    const b = detectTestBody(1);
+    act('ac/detect/test', b, 'Đã phát thử: ' + stateDesc({ power: 1, mode: +b.mode, temp_half: +(b.temp_half || 0), fan: +b.fan, swing: +b.swing }));
+  });
+  $('det-test-off').addEventListener('click', () => act('ac/detect/test', detectTestBody(0), 'Đã phát lệnh Tắt'));
+  $('det-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (+$('det-tmin').value > +$('det-tmax').value) {
+      toast('Nhiệt độ thấp nhất phải nhỏ hơn hoặc bằng cao nhất', true);
+      return;
+    }
+    const b = detectLib();
+    Object.assign(b, {
+      slot: $('det-slot').value, name: $('det-name').value.trim(), modes: detectModes(), tmin_half: $('det-tmin').value,
+      tmax_half: $('det-tmax').value, step: $('det-step').value, swing: $('det-swing').checked ? 1 : 0,
+    });
+    const j = await act('ac/detect/save', b, 'Đã lưu profile ' + b.name + ' và chuyển sang dùng nó');
+    if (j) {
+      st.dirty['det-form'] = false;
+      st.editSlot = +b.slot;
+      if (j.restart_needed) toast('Đã lưu. Khởi động lại để ứng dụng nhà nhận chế độ, nhiệt độ và tốc độ quạt mới.');
     }
   });
 
@@ -828,7 +967,7 @@
     for (const s of document.querySelectorAll('select.sel-fan')) fillSelect(s, AC_FANS.map((n, i) => [i, n]), 0);
     for (const s of document.querySelectorAll('select.sel-swing')) fillSelect(s, SWINGS.map((n, i) => [i, n]), 0);
     for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => go(b.dataset.page));
-    ['ace-form', 'ctl-form', 'algo-form'].forEach(trackDirty);
+    ['ace-form', 'ctl-form', 'algo-form', 'det-form'].forEach(trackDirty);
     updateLearnForm();
   }
 

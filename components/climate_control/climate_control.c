@@ -164,7 +164,8 @@ static void transmit(const climate_output_t *out, bool force)
     ac_resolve_kind_t kind = AC_RESOLVE_NONE;
     uint8_t *blob = NULL;
     size_t len = 0;
-    esp_err_t err = ac_profiles_build_command(&out->desired, out->user_target_half, &chosen, &kind, &blob, &len);
+    esp_err_t err = ac_profiles_build_command(&out->desired, s_has_desired_sent ? &s_last_desired_sent : NULL,
+                                              out->user_target_half, &chosen, &kind, &blob, &len);
     if (err != ESP_OK) {
         char desc[64]; /* + 24 byte prefix fits last_error[96] */
         ac_state_describe(&out->desired, desc, sizeof(desc));
@@ -355,7 +356,8 @@ esp_err_t climate_control_start(const app_config_t *cfg)
     load_runtime();
     refresh_params();
     s_status.running = true;
-    if (xTaskCreate(task, "climate", 4096, NULL, 6, NULL) != pdPASS) {
+    /* 6 KB: library profiles generate their commands here (IRremoteESP8266 IRac, ~2.5 KB deep) */
+    if (xTaskCreate(task, "climate", 6144, NULL, 6, NULL) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;

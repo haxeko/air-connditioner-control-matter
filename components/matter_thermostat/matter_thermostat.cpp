@@ -490,7 +490,7 @@ void RefreshNodeLabel()
     }
 }
 
-/* BLE GAP name "AC-1A2B-v1.2.0" (same MAC digits as the configuration Wi-Fi SSID). CHIP allows at
+/* BLE GAP name "AC-1A2B-v1.3.0" (same MAC digits as the configuration Wi-Fi SSID). CHIP allows at
  * most 15 characters; without the version it would not fit, the MAC digits are dropped first. */
 void SetBleName()
 {

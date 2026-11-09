@@ -1,4 +1,4 @@
-idf_component_register(SRCS "ac_profiles.c" "ac_types.c"
+idf_component_register(SRCS "ac_profiles.c" "ac_types.c" "ac_irlib.cpp"
                        INCLUDE_DIRS "include"
-                       REQUIRES esp_common
-                       PRIV_REQUIRES app_state config_store ir_transceiver nvs_flash)
+                       REQUIRES esp_common ir_transceiver
+                       PRIV_REQUIRES app_state config_store irremote_esp8266 nvs_flash)

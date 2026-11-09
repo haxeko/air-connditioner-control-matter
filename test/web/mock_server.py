@@ -24,7 +24,7 @@ T0 = time.time()
 STATE = {
     "wifi": {"configured": True, "ssid": "NhaToi", "connected": True, "rssi": -58, "channel": 6,
              "ip4": "192.168.1.42", "ip6": ["fe80::1234:56ff:fe78:9abc", "fd12:3456::42"], "conflict": False,
-             "portal_open": True, "ap_ssid": "AC-Matter-1A2B-v1.2.0", "ap_clients": 1, "portal_remaining_s": 600,
+             "portal_open": True, "ap_ssid": "AC-Matter-1A2B-v1.3.0", "ap_clients": 1, "portal_remaining_s": 600,
              "job": 0, "job_message": "", "scanning": False},
     "scan": [],
     "scan_until": 0,
@@ -92,6 +92,17 @@ def caps(slot):
             "ranges": [{"mode": m, "min_half": r[0], "max_half": r[1]} for m, r in sorted(ranges.items())]}
 
 
+def lib_caps(lib):
+    """Capabilities of a library profile (same rules as lib_caps() in ac_profiles.c)."""
+    modes = lib["modes"] | 1
+    fans = 1
+    for i in range(lib["fan_levels"]):
+        fans |= 1 << (1 + i)
+    return {"has_off": True, "modes_mask": modes, "fans_mask": fans, "swing_mask": 3 if lib["swing"] else 1, "codes": 0,
+            "ranges": [{"mode": m, "min_half": lib["tmin_half"], "max_half": lib["tmax_half"]}
+                       for m in range(5) if modes & (1 << m) and m != 3]}
+
+
 def climate():
     th = STATE["thermostat"]
     desired = "off" if th["mode"] == 0 else f"m0t{th['cool_sp'] // 50}f{STATE['fan']}s{STATE['swing']}"
@@ -117,8 +128,8 @@ def matter():
     return {"started": True, "commissioner_ready": True, "home_fabrics": len(STATE["fabrics"]),
             "window_open": STATE["window_open"], "endpoint": 1, "heat": False, "vendor_id": 0xFFF1,
             "product_id": 0x8000, "discriminator": 2345, "ble": True,
-            "ble_advertising": STATE["window_open"], "ble_name": "AC-1A2B-v1.2.0",
-            "product_name": "May lanh IR v1.2.0", "node_label": "May lanh IR v1.2.0"}
+            "ble_advertising": STATE["window_open"], "ble_name": "AC-1A2B-v1.3.0",
+            "product_name": "May lanh IR v1.3.0", "node_label": "May lanh IR v1.3.0"}
 
 
 def pair_progress():
@@ -193,13 +204,14 @@ def route(method, path, q, f):
     s = STATE
     if method == "GET":
         if path == "session":
-            return {"token": TOKEN, "device": "May lanh IR v1.2.0", "version": "1.2.0", "test_mode": True}
+            return {"token": TOKEN, "device": "May lanh IR v1.3.0", "version": "1.3.0", "test_mode": True}
         if path == "status":
             p = s["profiles"][s["active"]]
             return {"wifi": s["wifi"], "matter": matter(), "temp": temp(), "sensor": sensor(False),
                     "climate": climate(), "ir": ir(),
                     "profile": {"slot": s["active"], "name": p["name"], "locked": p["locked"],
-                                "codes": len(s["codes"][s["active"]]), "restart_needed": False},
+                                "codes": len(s["codes"].get(s["active"], [])), "restart_needed": False,
+                                "library": p.get("lib", {}).get("protocol_name", "")},
                     "thermostat": s["thermostat"], "uptime_s": int(time.time() - T0) + 3600,
                     "error_count": len(s["errors"]), "test_mode": True}
         if path == "wifi":
@@ -232,7 +244,7 @@ def route(method, path, q, f):
             for p in s["profiles"]:
                 p = dict(p)
                 if p["present"]:
-                    p.update(caps(p["slot"]))
+                    p.update(lib_caps(p["lib"]) if "lib" in p else caps(p["slot"]))
                 profs.append(p)
             return {"active": s["active"], "profiles": profs, "ready": s["profiles"][0]["locked"],
                     "not_ready": "" if s["profiles"][0]["locked"] else "Profile chưa được khóa (xác nhận) sau khi học",
@@ -346,6 +358,28 @@ def route(method, path, q, f):
         require(s["learn"]["state"] not in (1, 2), 409, "Đang học một lệnh khác")
         s["learn"].update({"state": 1, "session": s["learn"]["session"] + 1, "t": time.time()})
         return {}
+    if path == "ac/detect/analyze":
+        require(learn_status()["state"] == 3 and int(g("session")) == s["learn"]["session"], 409,
+                "Không còn lệnh vừa học (đã học lệnh khác hoặc thất bại)")
+        return {"detect": {"recognized": True, "supported": True, "protocol": 16, "protocol_name": "DAIKIN",
+                           "bits": 280, "model": -1, "model_name": "", "models": [], "has_state": True,
+                           "state": state_obj("m0t50f0s0"), "fan_label": "tự động"}}
+    if path == "ac/detect/test":
+        require(g("protocol") == "16", 400, "Giao thức không hỗ trợ tạo lệnh")
+        last = "Tắt" if g("power") == "0" else describe(f"m{g('mode')}t{g('temp_half') or 0}f{g('fan')}s{g('swing')}")
+        s["ir"].update({"sent": s["ir"]["sent"] + 1, "last": "Thử thư viện: " + last, "t": time.time(), "src": 2})
+        return {}
+    if path == "ac/detect/save":
+        slot = int(g("slot"))
+        require(not s["profiles"][slot]["present"], 409, "Ô profile này đã có dữ liệu")
+        lib = {"protocol": 16, "protocol_name": "DAIKIN", "model": int(g("model")), "model_name": "",
+               "modes": int(g("modes")), "tmin_half": int(g("tmin_half")), "tmax_half": int(g("tmax_half")),
+               "fan_levels": int(g("fan_levels")), "swing": g("swing") == "1"}
+        s["profiles"][slot] = {"slot": slot, "present": True, "name": g("name"), "locked": True, "driver": 2,
+                               "step_half": int(g("step")), "default_fan": 0, "default_swing": 0,
+                               "carrier_hz": 38000, "lib": lib}
+        s["active"] = slot
+        return {"restart_needed": True}
     if path == "ac/learn/test":
         require(learn_status()["state"] == 3 and int(g("session")) == s["learn"]["session"], 409,
                 "Không còn lệnh vừa học (đã học lệnh khác hoặc thất bại)")

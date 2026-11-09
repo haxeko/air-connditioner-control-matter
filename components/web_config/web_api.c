@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ac_irlib.h"
 #include "ac_profiles.h"
 #include "app_state.h"
 #include "app_version.h"
@@ -294,8 +295,8 @@ static void put_learn(wj_t *w)
 static bool limits_differ(const ac_thermostat_limits_t *l, const thermostat_caps_t *t)
 {
     if (l->heat != t->heat || l->dry != t->dry || l->fan_only != t->fan_only || l->cool_min != t->cool_min ||
-        l->cool_max != t->cool_max) {
-        return true;
+        l->cool_max != t->cool_max || l->fan_levels_mask != t->fan_levels || l->swing != t->swing) {
+        return true; /* the Matter endpoint (modes, limits, Fan Control) is built at boot */
     }
     return l->heat && (l->heat_min != t->heat_min || l->heat_max != t->heat_max);
 }
@@ -346,6 +347,11 @@ static void get_status(api_ctx_t *c)
         wj_str(w, "name", meta.name);
         wj_bool(w, "locked", meta.locked);
         wj_uint(w, "codes", caps.code_count);
+        char lib[AC_IRLIB_NAME_LEN] = "";
+        if (meta.driver == AC_DRIVER_IRLIB) {
+            ac_irlib_protocol_name(meta.lib_protocol, lib, sizeof(lib));
+        }
+        wj_str(w, "library", lib);
     } else {
         wj_int(w, "slot", -1);
     }
@@ -855,6 +861,24 @@ static void put_caps(wj_t *w, const ac_caps_t *caps)
     wj_arr_end(w);
 }
 
+static void put_lib(wj_t *w, const ac_profile_lib_t *l)
+{
+    char name[AC_IRLIB_NAME_LEN];
+    wj_obj_begin(w, "lib");
+    wj_int(w, "protocol", l->protocol);
+    ac_irlib_protocol_name(l->protocol, name, sizeof(name));
+    wj_str(w, "protocol_name", name);
+    wj_int(w, "model", l->model);
+    ac_irlib_model_name(l->protocol, l->model, name, sizeof(name));
+    wj_str(w, "model_name", name);
+    wj_uint(w, "modes", l->modes);
+    wj_uint(w, "tmin_half", l->temp_min_half);
+    wj_uint(w, "tmax_half", l->temp_max_half);
+    wj_uint(w, "fan_levels", l->fan_levels);
+    wj_bool(w, "swing", l->swing);
+    wj_obj_end(w);
+}
+
 static void get_ac(api_ctx_t *c)
 {
     wj_t *w = c->w;
@@ -878,6 +902,10 @@ static void get_ac(api_ctx_t *c)
             wj_uint(w, "default_swing", m.default_swing);
             wj_uint(w, "carrier_hz", m.carrier_hz);
             put_caps(w, &caps);
+            ac_profile_lib_t lib;
+            if (ac_profiles_get_library(slot, &lib) == ESP_OK) {
+                put_lib(w, &lib);
+            }
         }
         wj_obj_end(w);
     }
@@ -1189,6 +1217,171 @@ static void post_learn_save(api_ctx_t *c)
         profile_changed_if_active(slot);
         put_state(c->w, "state", &st);
     }
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Automatic recognition of the remote (IRremoteESP8266 protocols, ac_irlib.h)                    */
+/* ------------------------------------------------------------------------------------------ */
+
+/* Last analysed capture and the state the AC got from the last test command (HTTP task only). */
+static ac_irlib_detect_t s_detect;
+static bool s_detect_valid;
+static ac_state_t s_detect_prev;
+static bool s_detect_has_prev;
+
+static void post_detect_analyze(api_ctx_t *c)
+{
+    size_t len = 0;
+    uint8_t *blob = learned_blob(c, &len);
+    if (blob == NULL) {
+        return;
+    }
+    uint16_t total = 0;
+    uint16_t *store = NULL;
+    ir_code_t code;
+    bool ok = ir_code_validate_blob(blob, len, &total) == IR_OK && total > 0 &&
+              (store = malloc(total * sizeof(uint16_t))) != NULL;
+    if (ok) {
+        ir_code_init(&code, store, total, 0);
+        ok = ir_code_deserialize(&code, blob, len) == IR_OK;
+    }
+    free(blob);
+    if (!ok) {
+        free(store);
+        api_fail(c, 409, "Không đọc được lệnh vừa thu");
+        return;
+    }
+    ac_irlib_detect_t d;
+    ac_irlib_result_t r = ac_irlib_decode(&code, &d);
+    free(store);
+    if (r == AC_IRLIB_ERR_NO_MEM) {
+        api_fail(c, 503, "Hết bộ nhớ");
+        return;
+    }
+    s_detect = d;
+    s_detect_valid = d.recognized && d.supported;
+    s_detect_prev = d.state;
+    s_detect_has_prev = d.has_state;
+
+    wj_t *w = c->w;
+    wj_obj_begin(w, "detect");
+    wj_bool(w, "recognized", d.recognized);
+    wj_bool(w, "supported", d.supported);
+    wj_int(w, "protocol", d.protocol);
+    wj_str(w, "protocol_name", d.protocol_name);
+    wj_uint(w, "bits", d.bits);
+    wj_int(w, "model", d.model);
+    char name[AC_IRLIB_NAME_LEN];
+    ac_irlib_model_name(d.protocol, d.model, name, sizeof(name));
+    wj_str(w, "model_name", name);
+    ac_irlib_model_t models[AC_IRLIB_MAX_MODELS];
+    size_t nm = d.supported ? ac_irlib_models(d.protocol, models, AC_IRLIB_MAX_MODELS) : 0;
+    wj_arr_begin(w, "models");
+    for (size_t i = 0; i < nm; i++) {
+        wj_obj_begin(w, NULL);
+        wj_int(w, "model", models[i].model);
+        wj_str(w, "name", models[i].name);
+        wj_obj_end(w);
+    }
+    wj_arr_end(w);
+    wj_bool(w, "has_state", d.has_state);
+    if (d.has_state) {
+        put_state(w, "state", &d.state);
+        wj_str(w, "fan_label", ac_irlib_fan_label(d.fan_raw));
+    }
+    wj_obj_end(w);
+}
+
+/* Library settings from the form; extras (display light, beep...) come from the analysed capture. */
+static bool lib_from_form(api_ctx_t *c, ac_profile_lib_t *l, bool full)
+{
+    long protocol, model, levels, modes = 0, tmin = AC_TEMP_HALF_MIN, tmax = AC_TEMP_HALF_MAX, step = 1;
+    memset(l, 0, sizeof(*l));
+    if (!form_get_int(c->body, "protocol", 1, 32767, &protocol) || !ac_irlib_protocol_supported((int16_t)protocol)) {
+        api_fail(c, 400, "Giao thức không hỗ trợ tạo lệnh");
+        return false;
+    }
+    if (!form_get_int(c->body, "model", -1, 64, &model) ||
+        !form_get_int(c->body, "fan_levels", AC_IRLIB_FAN_LEVELS_MIN, AC_IRLIB_FAN_LEVELS_MAX, &levels)) {
+        api_fail(c, 400, "Model hoặc số mức quạt không hợp lệ");
+        return false;
+    }
+    if (full && (!form_get_int(c->body, "modes", 0, (1 << AC_MODE_COUNT) - 1, &modes) ||
+                 !form_get_int(c->body, "tmin_half", AC_TEMP_HALF_MIN, AC_TEMP_HALF_MAX, &tmin) ||
+                 !form_get_int(c->body, "tmax_half", AC_TEMP_HALF_MIN, AC_TEMP_HALF_MAX, &tmax) ||
+                 !form_get_int(c->body, "step", 1, 2, &step) || tmin > tmax)) {
+        api_fail(c, 400, "Chế độ hoặc dải nhiệt độ không hợp lệ");
+        return false;
+    }
+    l->protocol = (int16_t)protocol;
+    l->model = (int16_t)model;
+    l->modes = full ? (uint8_t)modes : (uint8_t)((1u << AC_MODE_COUNT) - 1u);
+    l->temp_min_half = (uint8_t)tmin;
+    l->temp_max_half = (uint8_t)tmax;
+    l->temp_step_half = (uint8_t)step;
+    l->fan_levels = (uint8_t)levels;
+    l->swing = full ? form_get_bool(c->body, "swing", false) : true;
+    bool same = s_detect_valid && s_detect.protocol == l->protocol;
+    l->extra_flags = same ? s_detect.extra_flags : AC_IRLIB_X_LIGHT;
+    l->swing_h = same ? s_detect.swing_h : -1;
+    return true;
+}
+
+static void post_detect_test(api_ctx_t *c)
+{
+    ac_profile_lib_t lib;
+    ac_state_t st;
+    if (!lib_from_form(c, &lib, false) || !state_from_form(c, &st)) {
+        return;
+    }
+    uint8_t *blob = NULL;
+    size_t len = 0;
+    esp_err_t err = ac_profiles_build_library_command(&lib, &st, s_detect_has_prev ? &s_detect_prev : NULL, &blob,
+                                                      &len);
+    if (err != ESP_OK) {
+        api_fail(c, 409, "Không tạo được lệnh: %s", esp_err_to_name(err));
+        return;
+    }
+    char desc[64];
+    char label[96];
+    ac_state_describe(&st, desc, sizeof(desc));
+    snprintf(label, sizeof(label), "Thử thư viện: %s", desc);
+    err = ir_send(blob, len, IR_SRC_TEST, true, 0, label);
+    free(blob);
+    if (err != ESP_OK) {
+        api_fail(c, 503, "Không phát được: %s", esp_err_to_name(err));
+        return;
+    }
+    s_detect_prev = st;
+    s_detect_has_prev = true;
+}
+
+static void post_detect_save(api_ctx_t *c)
+{
+    long slot;
+    char name[32];
+    ac_profile_lib_t lib;
+    if (!get_slot(c, c->body, &slot) || !get_name(c, name, sizeof(name)) || !lib_from_form(c, &lib, true)) {
+        return;
+    }
+    esp_err_t err = ac_profiles_create_library((int)slot, name, &lib, true);
+    if (err == ESP_ERR_INVALID_STATE) {
+        api_fail(c, 409, "Ô profile này đã có dữ liệu: chọn ô trống hoặc xóa profile cũ");
+        return;
+    } else if (err == ESP_ERR_INVALID_ARG) {
+        api_fail(c, 400, "Cấu hình không hợp lệ");
+        return;
+    } else if (err != ESP_OK) {
+        api_fail(c, 500, "Không lưu được: %s", esp_err_to_name(err));
+        return;
+    }
+    err = ac_profiles_select((int)slot, NULL);
+    if (err != ESP_OK) {
+        api_fail(c, 500, "Đã lưu nhưng không chọn được: %s", esp_err_to_name(err));
+        return;
+    }
+    climate_control_profile_changed();
+    wj_bool(c->w, "restart_needed", restart_needed());
 }
 
 static bool code_from_form(api_ctx_t *c, long *slot, ac_state_t *st)
@@ -1539,6 +1732,9 @@ const api_route_t g_api_routes[] = {
     { "ac/learn/cancel", NULL, post_learn_cancel },
     { "ac/learn/test", NULL, post_learn_test },
     { "ac/learn/save", NULL, post_learn_save },
+    { "ac/detect/analyze", NULL, post_detect_analyze },
+    { "ac/detect/test", NULL, post_detect_test },
+    { "ac/detect/save", NULL, post_detect_save },
     { "ac/code/test", NULL, post_code_test },
     { "ac/code/delete", NULL, post_code_delete },
     { "ac/control", NULL, post_ac_control },
