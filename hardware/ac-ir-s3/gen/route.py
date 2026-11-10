@@ -51,6 +51,9 @@ _ux, _uy, _ = PLACE["U1"]
 _jx, _jy, _ = PLACE["J1"]
 NO_TOP = [(_ux - 8.0, -1.0, _ux + 8.0, _uy + 11.75),        # module body inside its pad ring
           (-1.0, _jy - 4.52, _jx + 2.4, _jy + 4.52)]         # USB-C shell (pads start at x + 2.48)
+# GND via sites kept free of other nets before routing (offset from a footprint position): where a
+# GND pad is boxed in by power tracks unless its drop via has a reserved place (LDO input/output caps).
+GND_VIA_SITES = [("C1", -0.8, -1.25)]   # between the GND pads of C1 and C2, under the LDO: serves both
 ORDER = ["/CC1", "/CC2", "VBUS", "/PH_5V", "/VIN", "+5V", "/EN", "/IR_TX", "/IR_RX",
          "/IR_A", "/IR_M", "/IR_K", "+3V3", "/IO0", "/IR_GATE", "/IR_VS",
          "/RGB", "/RGB_DIN", "/LED_VDD", "/TXD0", "/RXD0"]
@@ -308,6 +311,9 @@ class Router:
                 self.maps.paint(it, dyn=False)
                 if it.net and not it.net.startswith("#") and not it.net.startswith("unconnected-"):
                     self.pads.setdefault(it.net, []).append(it)
+        for ref, dx, dy in GND_VIA_SITES:  # reserved like a GND via: other nets route around it
+            x, y, _ = PLACE[ref]
+            self.maps.paint(Item("GND", [0, 1], "circle", (x + dx, y + dy, CLASSES["Default"]["via"] / 2)), dyn=False)
         self.netinfo = {n.GetNetname(): n for n in board.GetNetsByName().values()}
         self.routed = {}                    # net -> [(Item, board object)]
         self.trace = {}                     # net -> [(kind, layer, cell)] centreline cells and via cells

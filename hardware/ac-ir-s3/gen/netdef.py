@@ -6,7 +6,7 @@ Net names are the names that end up in the netlist and on the board.
 
 PROJECT = "ac_ir_s3"
 TITLE = "AC IR Matter module (ESP32-S3-WROOM-1-N16R8)"
-REV = "1.2"
+REV = "1.3"
 DATE = "2026-11-09"
 COMPANY = "DIY - air-connditioner-control-matter"
 BOARD_W, BOARD_H = 30.0, 39.0   # board outline (mm)
@@ -56,8 +56,9 @@ PARTS = {
                pins={"2": "IR_A", "1": "IR_M"}, fields={"Spec": "IR LED 5 mm 940 nm, >= 100 mA", "MPN": "TSAL6200"}),
     "D3": dict(lib="Device:LED", value="IR 940nm", fp="LED_THT:LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm_IRBlack",
                pins={"2": "IR_M", "1": "IR_K"}, fields={"Spec": "IR LED 5 mm 940 nm, >= 100 mA", "MPN": "TSAL6200"}),
-    "D4": dict(lib="LED:SK6812MINI", value="SK6812MINI", fp="LED_SMD:LED_SK6812MINI_PLCC4_3.5x3.5mm_P1.75mm",
-               pins={"4": "LED_VDD", "2": "GND", "3": "RGB_DIN"}, fields={"Spec": "addressable RGB LED 3.5x3.5 mm", "MPN": "SK6812MINI"}),
+    "D4": dict(lib="LED:WS2812B-2020", value="WS2812B-2020", fp="LED_SMD:LED_WS2812B-2020_PLCC4_2.0x2.0mm",
+               pins={"4": "LED_VDD", "2": "GND", "3": "RGB_DIN"},
+               fields={"Spec": "addressable RGB LED 2.0x2.0 mm (reflow)", "MPN": "WS2812B-2020", "LCSC": "C965555"}),
     "U4": dict(lib="Interface_Optical:TSOP382xx", value="TSOP38238", fp="OptoDevice:Vishay_MINICAST-3Pin",
                pins={"1": "IR_RX", "2": "GND", "3": "IR_VS"},
                fields={"Spec": "IR receiver 38 kHz, pinout OUT-GND-VS (TSOP38238, VS1838B)", "MPN": "TSOP38238"}),

@@ -5,7 +5,7 @@
 "C4,C7","100n","0603 X7R 50 V","Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder","","C14663","2"
 "D1","1N4148W","small-signal diode SOD-123","Diode_SMD:D_SOD-123","1N4148W","C81598","1"
 "D2,D3","IR 940nm","IR LED 5 mm 940 nm, >= 100 mA","LED_THT:LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm_IRBlack","TSAL6200","","2"
-"D4","SK6812MINI","addressable RGB LED 3.5x3.5 mm","LED_SMD:LED_SK6812MINI_PLCC4_3.5x3.5mm_P1.75mm","SK6812MINI","","1"
+"D4","WS2812B-2020","addressable RGB LED 2.0x2.0 mm (reflow)","LED_SMD:LED_WS2812B-2020_PLCC4_2.0x2.0mm","WS2812B-2020","C965555","1"
 "D5","B5819W","Schottky 1 A 40 V SOD-123 (USB-C input)","Diode_SMD:D_SOD-123","B5819W","C8598","1"
 "D6","B5819W","Schottky 1 A 40 V SOD-123 (PH2.0 input)","Diode_SMD:D_SOD-123","B5819W","C8598","1"
 "F1","PTC 0.75A hold","PTC resettable fuse 1206, I_hold 0.75 A, >= 6 V","Fuse:Fuse_1206_3216Metric_Pad1.42x1.75mm_HandSolder","","","1"

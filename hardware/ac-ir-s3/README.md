@@ -3,10 +3,15 @@
 Bo 2 lớp **30 × 39 mm**, cấp nguồn 5 V bằng **USB-C (chỉ cấp nguồn)** hoặc **đầu PH2.0** (GND, 5V), chỉ có nút
 **BOOT**, nạp firmware qua **5 pad ở mặt dưới** (3V3, TX, RX, GND, IO0). Có 2 LED phát IR và mắt thu IR, chạy thẳng
 firmware `ac_matter_ir` (cùng file `.bin` với bo DevKitC, không phải đổi cấu hình). Linh kiện dán từ **0603** trở
-lên, pad loại hàn tay. Kể cả ăng-ten module chìa ra mép trên và đầu LED IR chìa ra mép dưới, cả cụm khoảng
+lên, pad loại hàn tay; riêng LED trạng thái D4 là WS2812B-2020 (2 × 2 mm, pad nằm dưới thân), nên hàn bằng khò
+hoặc đặt xưởng hàn sẵn. Kể cả ăng-ten module chìa ra mép trên và đầu LED IR chìa ra mép dưới, cả cụm khoảng
 31 × 49 mm.
 
-![Mặt trên](docs/ac_ir_s3_v1.2_top.png)
+![Mặt trên](docs/ac_ir_s3_v1.3_top.png)
+
+**v1.3** (so với v1.2): LED trạng thái D4 đổi từ SK6812MINI (3,5 × 3,5 mm) sang **WS2812B-2020** (2 × 2 mm, LCSC
+C965555), cùng giao thức và cùng chân nối, firmware không đổi. Bộ đi dây giữ sẵn chỗ via GND cho tụ C1/C2 của
+LDO trước khi đi dây tín hiệu.
 
 **v1.2** (so với v1.1): bỏ header J2 cũ (UART + SDA/SCL), thay bằng 5 pad nạp ở mặt dưới; thêm đầu PH2.0 5 V;
 mỗi nguồn vào đi qua một diode Schottky B5819W; bỏ 2 lỗ bắt vít; R8 còn 18 Ω (bù sụt áp diode); bo nhỏ từ
@@ -15,13 +20,13 @@ mỗi nguồn vào đi qua một diode Schottky B5819W; bỏ 2 lỗ bắt vít; 
 | File | Nội dung |
 |---|---|
 | `ac_ir_s3.kicad_pro` / `.kicad_sch` / `.kicad_pcb` | Dự án KiCad 9 (mở bằng KiCad 9.0 trở lên) |
-| `fab/ac_ir_s3_v1.2_gerbers.zip` | Gerber + file khoan, gửi cho xưởng mạch in |
-| `fab/ac_ir_s3_v1.2_bom.csv` | Danh sách linh kiện (giá trị, thông số, mã hãng, mã LCSC) |
-| `fab/ac_ir_s3_v1.2_cpl.csv` | Tọa độ đặt linh kiện (nếu đặt xưởng hàn SMT), gốc ở góc dưới-trái bo |
-| `docs/ac_ir_s3_v1.2_schematic.pdf` / `.png` | Sơ đồ nguyên lý |
-| `docs/ac_ir_s3_v1.2_assembly_top.pdf` | Bản vẽ lắp ráp: vị trí và tên từng linh kiện |
-| `docs/ac_ir_s3_v1.2_top.png`, `_bottom.png` | Ảnh mặt trên / mặt dưới bo |
-| `docs/ac_ir_s3_v1.2_erc.txt`, `_drc.txt` | Kết quả kiểm tra ERC / DRC |
+| `fab/ac_ir_s3_v1.3_gerbers.zip` | Gerber + file khoan, gửi cho xưởng mạch in |
+| `fab/ac_ir_s3_v1.3_bom.csv` | Danh sách linh kiện (giá trị, thông số, mã hãng, mã LCSC) |
+| `fab/ac_ir_s3_v1.3_cpl.csv` | Tọa độ đặt linh kiện (nếu đặt xưởng hàn SMT), gốc ở góc dưới-trái bo |
+| `docs/ac_ir_s3_v1.3_schematic.pdf` / `.png` | Sơ đồ nguyên lý |
+| `docs/ac_ir_s3_v1.3_assembly_top.pdf` | Bản vẽ lắp ráp: vị trí và tên từng linh kiện |
+| `docs/ac_ir_s3_v1.3_top.png`, `_bottom.png` | Ảnh mặt trên / mặt dưới bo |
+| `docs/ac_ir_s3_v1.3_erc.txt`, `_drc.txt` | Kết quả kiểm tra ERC / DRC |
 | `gen/` | Script đã sinh ra sơ đồ, bo, đường mạch và các file trên |
 
 ## Kiểm tra thiết kế
@@ -37,7 +42,7 @@ mỗi nguồn vào đi qua một diode Schottky B5819W; bỏ 2 lỗ bắt vít; 
 
 ## Mạch
 
-![Sơ đồ nguyên lý](docs/ac_ir_s3_v1.2_schematic.png)
+![Sơ đồ nguyên lý](docs/ac_ir_s3_v1.3_schematic.png)
 
 | Khối | Linh kiện | Ghi chú |
 |---|---|---|
@@ -46,7 +51,7 @@ mỗi nguồn vào đi qua một diode Schottky B5819W; bỏ 2 lỗ bắt vít; 
 | ESP32-S3 | U1 ESP32-S3-WROOM-1-**N16R8**, R1 10 kΩ + C5 1 µF ở EN (tự reset khi cấp điện), R2 10 kΩ kéo lên GPIO0 | GPIO35–37 bỏ trống (PSRAM octal); GPIO8/9/19/20 không dùng |
 | Phát IR | D2, D3: 2 LED IR 5 mm 940 nm **nối tiếp**, R8 18 Ω 1206, Q1 AO3400A, R6 100 Ω, R7 10 kΩ, C8 4,7 µF | (5 V − 0,4 V − 2 × 1,35 V) / 18 Ω ≈ 100 mA đỉnh, sóng mang 38 kHz 33 % |
 | Thu IR | U4 TSOP38238 / VS1838B, lọc nguồn R5 100 Ω + C6 4,7 µF | Chân **OUT – GND – VS**, nguồn 3,3 V |
-| LED trạng thái | D4 SK6812MINI ở GPIO48, cấp từ 5 V qua D1 1N4148W (≈ 3,9 V) | Mức logic 3,3 V vẫn đủ ngưỡng cao của LED |
+| LED trạng thái | D4 WS2812B-2020 ở GPIO48, cấp từ 5 V qua D1 1N4148W (≈ 3,9 V) | Ở 3,9 V LED cần mức cao ≥ 0,7 × 3,9 ≈ 2,7 V: mức 3,3 V của ESP đủ |
 | Nút | SW1 **BOOT** (GPIO0) | BOOT 2 lần: ghép Matter; 3 lần: Wi-Fi cấu hình; giữ BOOT khi cấp điện: chế độ nạp |
 | Pad nạp (mặt dưới) | TP1 3V3 · TP2 TX · TP3 RX · TP4 GND · TP5 IO0, cách nhau 2,54 mm | UART0 nạp firmware, xem log, console; IO0 sát GND để chập khi nạp |
 
@@ -70,11 +75,13 @@ vào PH2.0) nên từ 1 A trở lên.
 
 ## Lắp ráp
 
-1. Hàn linh kiện dán trước: U2, Q1, D1, D5, D6, D4, các R/C, F1, nút BOOT, rồi J1 (6 chân bước khoảng 1 mm, hàn
+1. Hàn **D4 trước tiên bằng khò** (khoảng 300 °C, có kem hàn, không quá 10 giây; WS2812B-2020 chịu nhiệt kém,
+   pad nằm hết dưới thân nên mỏ hàn không với tới). Đặt xưởng hàn SMT thì bỏ qua bước này.
+   Sau đó hàn: U2, Q1, D1, D5, D6, các R/C, F1, nút BOOT, rồi J1 (6 chân bước khoảng 1 mm, hàn
    chắc 4 chân vỏ), cuối cùng module U1. Pad GND giữa module nên hàn bằng khò hoặc bếp hàn; hàn tay thì vẫn chạy
    vì module còn GND ở chân 1 và 40. J1 là GCT USB4125-GF-A; dùng loại USB-C 6 chân SMD khác thì so vị trí chân
    và chân vỏ với bản vẽ lắp ráp trước khi mua.
-2. Chú ý chiều: vạch catốt của D1, D5, D6; dấu chân 1 của D4 (góc vát); U2/Q1 theo dấu chân 1 trên bản vẽ lắp ráp.
+2. Chú ý chiều: vạch catốt của D1, D5, D6; chân 1 của D4 theo dấu chân 1 trên bản vẽ lắp ráp (đối chiếu dấu chân 1 trên thân LED với datasheet WS2812B-2020); U2/Q1 theo dấu chân 1 trên bản vẽ lắp ráp.
 3. **LED IR**: chân dài (anốt) vào lỗ tròn, chân ngắn (catốt) vào lỗ vuông. Bẻ chân 90° cho LED nằm sát mặt
    bo, đầu LED chìa ra ngoài mép dưới (thân LED cao 3 mm tính tới tâm).
 4. **Mắt thu**: lỗ vuông = OUT, giữa = GND, còn lại = VS, mặt cầu (vòm) quay ra mép bo. VS1838B và TSOP38238
@@ -124,8 +131,8 @@ bộ chuyển. Mã ghép Matter cũng xem được mà không cần UART: trang 
 
 ## Đặt mạch
 
-- Xưởng mạch in (JLCPCB, PCBWay…): tải `fab/ac_ir_s3_v1.2_gerbers.zip`; 2 lớp, FR-4 1,6 mm, đồng 1 oz.
-- Đặt xưởng hàn SMT: thêm `fab/ac_ir_s3_v1.2_bom.csv` và `fab/ac_ir_s3_v1.2_cpl.csv`. Mã LCSC trong BOM chỉ để
+- Xưởng mạch in (JLCPCB, PCBWay…): tải `fab/ac_ir_s3_v1.3_gerbers.zip`; 2 lớp, FR-4 1,6 mm, đồng 1 oz.
+- Đặt xưởng hàn SMT: thêm `fab/ac_ir_s3_v1.3_bom.csv` và `fab/ac_ir_s3_v1.3_cpl.csv`. Mã LCSC trong BOM chỉ để
   tham khảo, kiểm tra lại từng mã và xem lại chiều linh kiện ở bước xem trước của xưởng trước khi đặt. LED IR,
   mắt thu và PH2.0 là linh kiện chân cắm, tự hàn. 5 pad nạp chỉ là đồng trên bo, không có trong BOM.
 

@@ -274,7 +274,7 @@ Mạch phát IR (dòng xung LED lớn hơn khả năng của GPIO, phải qua tr
 
 **Mạch in riêng:** [`hardware/ac-ir-s3/`](hardware/ac-ir-s3/README.md) là bo KiCad 9 hai lớp 30 × 39 mm dùng
 ESP32-S3-WROOM-1-N16R8: nguồn 5 V qua USB-C (chỉ cấp nguồn) hoặc đầu PH2.0, có sẵn 2 LED IR + MOSFET, mắt thu, LED
-RGB, nút BOOT và 5 pad nạp UART ở mặt dưới (3V3, TX, RX, GND, IO0; nạp bằng bộ chuyển USB-UART 3,3 V), đúng các
+RGB WS2812B-2020, nút BOOT và 5 pad nạp UART ở mặt dưới (3V3, TX, RX, GND, IO0; nạp bằng bộ chuyển USB-UART 3,3 V), đúng các
 chân mặc định ở bảng trên (không phải đổi cấu hình firmware). Kèm Gerber, BOM, file tọa độ linh kiện và hướng dẫn
 lắp ráp, nạp.
 
