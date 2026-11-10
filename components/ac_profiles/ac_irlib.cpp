@@ -471,6 +471,36 @@ extern "C" const char * ac_irlib_fan_label(uint8_t fan_raw)
     }
 }
 
+extern "C" uint8_t ac_irlib_fan_from_lib(uint8_t fan_raw, uint8_t fan_levels)
+{
+    if (fan_raw > static_cast<uint8_t>(fanspeed_t::kLastFanspeedEnum)) {
+        return AC_FAN_AUTO;
+    }
+    return FromLibFan(static_cast<fanspeed_t>(fan_raw), fan_levels);
+}
+
+extern "C" bool ac_irlib_profile_state(const ac_irlib_detect_t * d, uint8_t fan_levels, uint8_t temp_min_half,
+                                       uint8_t temp_max_half, ac_state_t * out)
+{
+    if (d == nullptr || out == nullptr || !d->has_state) {
+        return false;
+    }
+    ac_state_t st = d->state;
+    if (st.power == 0) {
+        memset(&st, 0, sizeof(st));
+    } else {
+        if (st.fan != AC_FAN_QUIET && st.fan != AC_FAN_TURBO) {
+            st.fan = ac_irlib_fan_from_lib(d->fan_raw, fan_levels);
+        }
+        if (st.mode != AC_MODE_FAN && temp_min_half <= temp_max_half) {
+            st.temp_half = st.temp_half < temp_min_half ? temp_min_half
+                                                        : (st.temp_half > temp_max_half ? temp_max_half : st.temp_half);
+        }
+    }
+    *out = st;
+    return true;
+}
+
 extern "C" uint8_t ac_irlib_fan_to_lib(uint8_t fan, uint8_t fan_levels)
 {
     bool quiet;

@@ -99,6 +99,18 @@ const char *ac_irlib_fan_label(uint8_t fan_raw);
 /** Library fan speed used for `fan` with a remote that has `fan_levels` speeds (exposed for tests). */
 uint8_t ac_irlib_fan_to_lib(uint8_t fan, uint8_t fan_levels);
 
+/** AC fan (AC_FAN_AUTO, AC_FAN_1..) of a library fan speed (ac_irlib_detect_t.fan_raw) read from a
+ *  remote that has `fan_levels` speeds: the inverse of ac_irlib_fan_to_lib(). */
+uint8_t ac_irlib_fan_from_lib(uint8_t fan_raw, uint8_t fan_levels);
+
+/**
+ * State a decoded command sets for a profile of that remote: fan read with the remote's `fan_levels`
+ * speeds (Quiet/Turbo kept), temperature clamped to [temp_min_half, temp_max_half], an "off" command
+ * reduced to power 0. False when `d` carries no state.
+ */
+bool ac_irlib_profile_state(const ac_irlib_detect_t *d, uint8_t fan_levels, uint8_t temp_min_half,
+                            uint8_t temp_max_half, ac_state_t *out);
+
 #ifdef __cplusplus
 }
 #endif

@@ -30,6 +30,9 @@ static const char *TAG = "ir";
 #define MIN_COMMAND_LEVELS 16     /* shorter captures are noise, not a remote */
 #define SEG_QUEUE_LEN 40
 #define SYMBOL_STORE_SYMBOLS (CONFIG_APP_IR_MAX_LEVELS / 2 + 2 * CONFIG_APP_IR_MAX_SEGMENTS)
+#define MONITOR_MAX_CAPTURE_MS 3000 /* longer without a pause: lamp or sunlight noise, not a remote */
+#define MONITOR_POLL_MS 50          /* end-of-command check while a capture is in progress */
+#define MONITOR_ECHO_GUARD_US 60000 /* receiver output right after an own transmission is ignored */
 
 /* ------------------------------------------------------------------------------------------ */
 /* RX: everything touched by the ISR lives in internal RAM (ISR is cache-safe)                  */
@@ -48,19 +51,33 @@ static rmt_encoder_handle_t s_copy_encoder;
 
 static DRAM_ATTR rmt_symbol_word_t s_rx_chunk[RX_CHUNK_SYMBOLS];
 static DRAM_ATTR rmt_receive_config_t s_rx_cfg;
-static rmt_symbol_word_t *s_sym_store;      /* internal RAM, allocated per learning session */
+static rmt_symbol_word_t *s_sym_store;      /* = s_buf_store while the receiver runs, else NULL */
 static volatile DRAM_ATTR uint32_t s_sym_write;
 static volatile DRAM_ATTR uint32_t s_seg_start;
 static volatile DRAM_ATTR bool s_seg_overflow;
 static volatile DRAM_ATTR bool s_rx_armed;
+static volatile DRAM_ATTR bool s_rx_notify; /* monitoring: wake the worker for every segment */
 static QueueHandle_t s_seg_queue;
 static StaticQueue_t s_seg_queue_buf;
 static DRAM_ATTR uint8_t s_seg_queue_storage[SEG_QUEUE_LEN * sizeof(seg_event_t)];
+static TaskHandle_t s_task;
+
+/* Capture buffers shared by learning and monitoring (both run on the worker task, never together).
+ * Only the symbol store is touched by the ISR: internal RAM; the others may live in PSRAM. */
+static rmt_symbol_word_t *s_buf_store;
+static uint16_t *s_buf_levels;
+static ir_symbol_t *s_buf_conv;
+
+#define NOTIFY_TX (1u << 0)
+#define NOTIFY_LEARN (1u << 1)
+#define NOTIFY_RX (1u << 2)
+#define NOTIFY_MONITOR (1u << 3)
 
 static bool IRAM_ATTR rx_done_cb(rmt_channel_handle_t channel, const rmt_rx_done_event_data_t *edata, void *ctx)
 {
     (void)ctx;
     BaseType_t woken = pdFALSE;
+    BaseType_t woken_notify = pdFALSE;
     if (s_sym_store == NULL) {
         return false;
     }
@@ -92,8 +109,11 @@ static bool IRAM_ATTR rx_done_cb(rmt_channel_handle_t channel, const rmt_rx_done
                 s_rx_armed = false;
             }
         }
+        if (s_rx_notify) {
+            xTaskNotifyFromISR(s_task, NOTIFY_RX, eSetBits, &woken_notify);
+        }
     }
-    return woken == pdTRUE;
+    return woken == pdTRUE || woken_notify == pdTRUE;
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -112,7 +132,6 @@ typedef struct {
 
 static SemaphoreHandle_t s_lock;
 static StaticSemaphore_t s_lock_buf;
-static TaskHandle_t s_task;
 static ir_learn_status_t s_learn;
 static uint8_t *s_learn_result;
 static size_t s_learn_result_len;
@@ -126,8 +145,16 @@ static int64_t s_last_tx_end_us;
 static uint16_t s_carrier_hz = CONFIG_APP_IR_CARRIER_HZ;
 static uint16_t s_applied_carrier_hz;
 
-#define NOTIFY_TX (1u << 0)
-#define NOTIFY_LEARN (1u << 1)
+/* Monitoring of the original remote. Requested through the API (s_lock), run by the worker. */
+static ir_monitor_cb_t s_monitor_cb;
+static bool s_monitor_wanted;
+static ir_monitor_status_t s_mon_status;
+static bool s_mon_running;     /* worker only */
+static ir_capture_t s_mon_cap; /* worker only */
+static bool s_mon_active;      /* a command is being captured */
+static bool s_mon_bad;         /* it cannot be used (overflow, format) */
+static int64_t s_mon_first_us;
+static int64_t s_mon_last_us;
 
 static void lock(void)
 {
@@ -156,37 +183,18 @@ static void set_learn(ir_learn_state_t st, const char *msg)
 static void rx_stop(void)
 {
     s_rx_armed = false;
-    rmt_disable(s_rx); /* aborts a pending receive */
+    rmt_disable(s_rx); /* aborts a pending receive; ESP_ERR_INVALID_STATE when already off */
+    s_sym_store = NULL;
 }
 
-static void learn_session(void)
+/* Arm the receiver with an empty symbol store and segment queue. */
+static esp_err_t rx_start(void)
 {
-    const uint32_t idle_us = CONFIG_APP_IR_RX_IDLE_US;
-    uint16_t *levels = heap_caps_malloc(CONFIG_APP_IR_MAX_LEVELS * sizeof(uint16_t), MALLOC_CAP_8BIT);
-    ir_symbol_t *conv = heap_caps_malloc(SYMBOL_STORE_SYMBOLS * sizeof(ir_symbol_t), MALLOC_CAP_8BIT);
-    rmt_symbol_word_t *store =
-        heap_caps_malloc(SYMBOL_STORE_SYMBOLS * sizeof(rmt_symbol_word_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (levels == NULL || conv == NULL || store == NULL) {
-        free(levels);
-        free(conv);
-        free(store);
-        set_learn(IR_LEARN_FAILED, "Không đủ bộ nhớ cho bộ đệm học IR");
-        return;
-    }
-
-    ir_capture_t cap;
-    ir_capture_reset(&cap, levels, CONFIG_APP_IR_MAX_LEVELS, s_carrier_hz, idle_us, CONFIG_APP_IR_MAX_SEGMENTS);
-
     xQueueReset(s_seg_queue);
     s_sym_write = 0;
     s_seg_start = 0;
     s_seg_overflow = false;
-    s_sym_store = store;
-
-    s_rx_cfg.signal_range_min_ns = CONFIG_APP_IR_RX_GLITCH_NS;
-    s_rx_cfg.signal_range_max_ns = idle_us * 1000u;
-    s_rx_cfg.flags.en_partial_rx = 1;
-
+    s_sym_store = s_buf_store;
     esp_err_t err = rmt_enable(s_rx);
     if (err == ESP_OK) {
         s_rx_armed = true;
@@ -194,10 +202,38 @@ static void learn_session(void)
     }
     if (err != ESP_OK) {
         rx_stop();
-        s_sym_store = NULL;
-        free(levels);
-        free(conv);
-        free(store);
+    }
+    return err;
+}
+
+/* Hand one received segment (symbols in the store) to a capture. */
+static ir_result_t capture_segment(ir_capture_t *cap, const seg_event_t *in)
+{
+    seg_event_t ev = *in;
+    if (ev.count > SYMBOL_STORE_SYMBOLS || ev.offset + ev.count > SYMBOL_STORE_SYMBOLS) {
+        ev.overflow = true;
+        ev.count = 0;
+    }
+    for (uint16_t i = 0; i < ev.count; i++) {
+        const rmt_symbol_word_t *s = &s_buf_store[ev.offset + i];
+        s_buf_conv[i].duration0 = s->duration0;
+        s_buf_conv[i].level0 = s->level0;
+        s_buf_conv[i].duration1 = s->duration1;
+        s_buf_conv[i].level1 = s->level1;
+    }
+    return ir_capture_add(cap, s_buf_conv, ev.count, ev.irq_time_us, ev.overflow);
+}
+
+static void learn_session(void)
+{
+    const uint32_t idle_us = CONFIG_APP_IR_RX_IDLE_US;
+    uint16_t *levels = s_buf_levels;
+
+    ir_capture_t cap;
+    ir_capture_reset(&cap, levels, CONFIG_APP_IR_MAX_LEVELS, s_carrier_hz, idle_us, CONFIG_APP_IR_MAX_SEGMENTS);
+
+    esp_err_t err = rx_start();
+    if (err != ESP_OK) {
         app_log_error("ir", "rmt_receive: %s", esp_err_to_name(err));
         set_learn(IR_LEARN_FAILED, "Không bật được bộ thu IR");
         return;
@@ -228,18 +264,7 @@ static void learn_session(void)
         }
         seg_event_t ev;
         if (xQueueReceive(s_seg_queue, &ev, wait) == pdTRUE) {
-            if (ev.count > SYMBOL_STORE_SYMBOLS || ev.offset + ev.count > SYMBOL_STORE_SYMBOLS) {
-                ev.overflow = true;
-                ev.count = 0;
-            }
-            for (uint16_t i = 0; i < ev.count; i++) {
-                const rmt_symbol_word_t *s = &store[ev.offset + i];
-                conv[i].duration0 = s->duration0;
-                conv[i].level0 = s->level0;
-                conv[i].duration1 = s->duration1;
-                conv[i].level1 = s->level1;
-            }
-            ir_result_t r = ir_capture_add(&cap, conv, ev.count, ev.irq_time_us, ev.overflow);
+            ir_result_t r = capture_segment(&cap, &ev);
             if (r != IR_OK && r != IR_ERR_EMPTY) {
                 final = r;
                 break;
@@ -261,18 +286,11 @@ static void learn_session(void)
             noise++;
             ESP_LOGW(TAG, "discarding %u level(s) of IR noise", cap.code.total_levels);
             ir_capture_reset(&cap, levels, CONFIG_APP_IR_MAX_LEVELS, s_carrier_hz, idle_us, CONFIG_APP_IR_MAX_SEGMENTS);
-            /* restart the symbol store as well (the receiver keeps running) */
+            /* restart the symbol store as well */
             rx_stop();
-            s_sym_write = 0;
-            s_seg_start = 0;
-            s_seg_overflow = false;
-            xQueueReset(s_seg_queue);
-            if (rmt_enable(s_rx) == ESP_OK) {
-                s_rx_armed = true;
-                if (rmt_receive(s_rx, s_rx_chunk, sizeof(s_rx_chunk), &s_rx_cfg) != ESP_OK) {
-                    final = IR_ERR_ARG;
-                    break;
-                }
+            if (rx_start() != ESP_OK) {
+                final = IR_ERR_ARG;
+                break;
             }
             lock();
             s_learn.state = IR_LEARN_WAITING;
@@ -284,7 +302,6 @@ static void learn_session(void)
     }
 
     rx_stop();
-    s_sym_store = NULL;
     app_state_set_busy(APP_BUSY_IR_LEARNING, false);
 
     if (done && cap.error == IR_OK) {
@@ -334,9 +351,150 @@ static void learn_session(void)
         }
         set_learn(IR_LEARN_FAILED, msg);
     }
-    free(levels);
-    free(conv);
-    free(store);
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Monitoring of the original remote (worker task)                                               */
+/* ------------------------------------------------------------------------------------------ */
+
+static void monitor_reset_capture(void)
+{
+    ir_capture_reset(&s_mon_cap, s_buf_levels, CONFIG_APP_IR_MAX_LEVELS, s_carrier_hz, CONFIG_APP_IR_RX_IDLE_US,
+                     CONFIG_APP_IR_MAX_SEGMENTS);
+    s_mon_active = false;
+    s_mon_bad = false;
+}
+
+static void monitor_set_listening(bool on)
+{
+    lock();
+    s_mon_status.listening = on;
+    unlock();
+}
+
+static void monitor_begin(void)
+{
+    if (s_mon_running) {
+        return;
+    }
+    monitor_reset_capture();
+    s_rx_notify = true;
+    esp_err_t err = rx_start();
+    if (err != ESP_OK) {
+        s_rx_notify = false;
+        app_log_error("ir", "remote monitor: receiver not armed (%s)", esp_err_to_name(err));
+        return;
+    }
+    s_mon_running = true;
+    monitor_set_listening(true);
+}
+
+static void monitor_end(void)
+{
+    if (!s_mon_running) {
+        return;
+    }
+    s_rx_notify = false;
+    rx_stop();
+    s_mon_running = false;
+    monitor_reset_capture(); /* a half-received command is dropped */
+    monitor_set_listening(false);
+}
+
+/* Deliver the command collected so far (if usable) and start over with an empty store. */
+static void monitor_finish(bool usable)
+{
+    uint8_t *blob = NULL;
+    size_t len = 0;
+    if (usable) {
+        len = ir_code_serialized_size(&s_mon_cap.code);
+        blob = malloc(len);
+        if (blob != NULL && ir_code_serialize(&s_mon_cap.code, blob, len) != len) {
+            free(blob);
+            blob = NULL;
+        }
+    }
+    lock();
+    ir_monitor_cb_t cb = s_monitor_wanted ? s_monitor_cb : NULL;
+    if (blob != NULL && cb != NULL) {
+        s_mon_status.commands++;
+        s_mon_status.last_us = esp_timer_get_time();
+    } else {
+        s_mon_status.discarded++;
+    }
+    unlock();
+    if (blob != NULL && cb != NULL) {
+        ESP_LOGI(TAG, "remote: %u segment(s), %u level(s) received", s_mon_cap.code.segment_count,
+                 s_mon_cap.code.total_levels);
+        cb(blob, len); /* owns the blob now */
+    } else {
+        free(blob);
+    }
+    rx_stop();
+    monitor_reset_capture();
+    if (rx_start() != ESP_OK) {
+        s_rx_notify = false;
+        s_mon_running = false;
+        monitor_set_listening(false);
+        app_log_error("ir", "remote monitor: receiver could not be re-armed");
+    }
+}
+
+static void monitor_poll(void)
+{
+    seg_event_t ev;
+    while (xQueueReceive(s_seg_queue, &ev, 0) == pdTRUE) {
+        if (s_last_tx_end_us != 0 && ev.irq_time_us - s_last_tx_end_us < MONITOR_ECHO_GUARD_US) {
+            continue; /* tail of our own transmission */
+        }
+        ir_result_t r = capture_segment(&s_mon_cap, &ev);
+        if (r == IR_ERR_EMPTY) {
+            continue;
+        }
+        if (!s_mon_active) {
+            s_mon_active = true;
+            s_mon_first_us = ev.irq_time_us;
+        }
+        if (r != IR_OK) {
+            s_mon_bad = true; /* sticky: wait for silence, then drop it */
+        }
+        s_mon_last_us = ev.irq_time_us;
+    }
+    if (!s_mon_active) {
+        if (s_sym_write > SYMBOL_STORE_SYMBOLS / 2) {
+            monitor_finish(false); /* only marks-less segments so far: start with an empty store */
+        }
+        return;
+    }
+    int64_t now = esp_timer_get_time();
+    bool ended = now - s_mon_last_us >= (int64_t)CONFIG_APP_IR_LEARN_END_GAP_MS * 1000;
+    bool too_long = now - s_mon_first_us >= (int64_t)MONITOR_MAX_CAPTURE_MS * 1000;
+    if (!ended && !too_long) {
+        return;
+    }
+    bool usable = ended && !too_long && !s_mon_bad && s_mon_cap.error == IR_OK &&
+                  !ir_capture_is_noise(&s_mon_cap, MIN_COMMAND_LEVELS);
+    if (!usable) {
+        ESP_LOGD(TAG, "remote monitor: %u level(s) discarded", s_mon_cap.code.total_levels);
+    }
+    monitor_finish(usable);
+}
+
+/* Follow the requested monitor state; returns true while a command is being captured. */
+static bool monitor_service(void)
+{
+    lock();
+    bool want = s_monitor_wanted && s_monitor_cb != NULL;
+    unlock();
+    if (want && !s_mon_running) {
+        monitor_begin();
+    } else if (!want && s_mon_running) {
+        monitor_end();
+    }
+    if (s_mon_running) {
+        monitor_poll();
+    }
+    return s_mon_running && s_mon_active;
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -426,11 +584,13 @@ out:
 static void worker(void *arg)
 {
     (void)arg;
+    bool capturing = false;
     for (;;) {
         uint32_t bits = 0;
-        xTaskNotifyWait(0, UINT32_MAX, &bits, portMAX_DELAY);
+        xTaskNotifyWait(0, UINT32_MAX, &bits, capturing ? pdMS_TO_TICKS(MONITOR_POLL_MS) : portMAX_DELAY);
 
         if (s_learn_requested) {
+            monitor_end(); /* the learning session owns the receiver */
             s_learn_requested = false;
             learn_session();
         }
@@ -446,6 +606,7 @@ static void worker(void *arg)
             s_has_pending = false;
             s_tx_status.busy = true;
             unlock();
+            monitor_end(); /* never report our own commands; listening resumes after the last one */
 
             int64_t since = esp_timer_get_time() - s_last_tx_end_us;
             int64_t min_gap = (int64_t)CONFIG_APP_IR_TX_MIN_GAP_MS * 1000;
@@ -475,6 +636,8 @@ static void worker(void *arg)
             }
             free(req.blob);
         }
+
+        capturing = monitor_service();
     }
 }
 
@@ -489,6 +652,20 @@ esp_err_t ir_transceiver_init(void)
     }
     s_lock = xSemaphoreCreateMutexStatic(&s_lock_buf);
     s_seg_queue = xQueueCreateStatic(SEG_QUEUE_LEN, sizeof(seg_event_t), s_seg_queue_storage, &s_seg_queue_buf);
+    s_buf_store =
+        heap_caps_malloc(SYMBOL_STORE_SYMBOLS * sizeof(rmt_symbol_word_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    /* kept for the whole run (monitoring): PSRAM when available, the task is their only user */
+    s_buf_levels = heap_caps_malloc_prefer(CONFIG_APP_IR_MAX_LEVELS * sizeof(uint16_t), 2,
+                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_8BIT);
+    s_buf_conv = heap_caps_malloc_prefer(SYMBOL_STORE_SYMBOLS * sizeof(ir_symbol_t), 2,
+                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_8BIT);
+    if (s_buf_store == NULL || s_buf_levels == NULL || s_buf_conv == NULL) {
+        ESP_LOGE(TAG, "no memory for the IR capture buffers");
+        return ESP_ERR_NO_MEM;
+    }
+    s_rx_cfg.signal_range_min_ns = CONFIG_APP_IR_RX_GLITCH_NS;
+    s_rx_cfg.signal_range_max_ns = CONFIG_APP_IR_RX_IDLE_US * 1000u;
+    s_rx_cfg.flags.en_partial_rx = 1;
 
     rmt_tx_channel_config_t tx_cfg = {
         .gpio_num = CONFIG_APP_IR_TX_GPIO,
@@ -655,6 +832,54 @@ void ir_tx_get_status(ir_tx_status_t *out)
     }
     lock();
     *out = s_tx_status;
+    unlock();
+}
+
+esp_err_t ir_monitor_start(ir_monitor_cb_t cb)
+{
+    if (s_task == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (cb == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    lock();
+    bool changed = !s_monitor_wanted || s_monitor_cb != cb;
+    s_monitor_cb = cb;
+    s_monitor_wanted = true;
+    s_mon_status.enabled = true;
+    unlock();
+    if (changed) {
+        ESP_LOGI(TAG, "listening for the original remote");
+        xTaskNotify(s_task, NOTIFY_MONITOR, eSetBits);
+    }
+    return ESP_OK;
+}
+
+void ir_monitor_stop(void)
+{
+    if (s_task == NULL) {
+        return;
+    }
+    lock();
+    bool changed = s_monitor_wanted;
+    s_monitor_wanted = false;
+    s_mon_status.enabled = false;
+    unlock();
+    if (changed) {
+        ESP_LOGI(TAG, "no longer listening for the original remote");
+        xTaskNotify(s_task, NOTIFY_MONITOR, eSetBits);
+    }
+}
+
+void ir_monitor_get_status(ir_monitor_status_t *out)
+{
+    if (s_lock == NULL) {
+        memset(out, 0, sizeof(*out));
+        return;
+    }
+    lock();
+    *out = s_mon_status;
     unlock();
 }
 

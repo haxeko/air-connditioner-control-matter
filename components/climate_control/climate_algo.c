@@ -62,6 +62,13 @@ void climate_algo_note_user_change(climate_algo_t *a, int64_t now_ms)
     a->last_comp_ms = now_ms;
 }
 
+void climate_algo_note_remote(climate_algo_t *a, int64_t now_ms)
+{
+    a->offset_centi = 0;
+    a->comp_active = false;
+    a->last_comp_ms = now_ms;
+}
+
 int16_t climate_quantize(int16_t centi, uint8_t step_half, bool heating)
 {
     int32_t step = (step_half == 1) ? 50 : 100;
@@ -205,6 +212,63 @@ void climate_algo_step(climate_algo_t *a, const climate_params_t *p, const clima
     out->offset_centi = a->offset_centi;
     out->ir_setpoint_centi = ir;
     out->desired.temp_half = (uint8_t)(ir / 50);
+}
+
+static bool user_mode_of(uint8_t ac_mode, const climate_offer_t *o, uint8_t *out)
+{
+    switch (ac_mode) {
+    case AC_MODE_COOL:
+        *out = CLIMATE_MODE_COOL;
+        return true;
+    case AC_MODE_HEAT:
+        *out = CLIMATE_MODE_HEAT;
+        return o->heat;
+    case AC_MODE_DRY:
+        *out = CLIMATE_MODE_DRY;
+        return o->dry;
+    case AC_MODE_FAN:
+        *out = CLIMATE_MODE_FAN_ONLY;
+        return o->fan_only;
+    default:
+        return false; /* Auto */
+    }
+}
+
+void climate_user_from_remote(const ac_state_t *remote, const climate_offer_t *offer, climate_user_t *user,
+                              climate_remote_result_t *res)
+{
+    memset(res, 0, sizeof(*res));
+    res->mode_shown = true;
+    if (remote->power == 0) {
+        user->user_mode = CLIMATE_MODE_OFF;
+        return;
+    }
+    uint8_t mode = CLIMATE_MODE_COOL;
+    if (user_mode_of(remote->mode, offer, &mode)) {
+        user->user_mode = mode;
+        if (remote->mode == AC_MODE_COOL || remote->mode == AC_MODE_HEAT) {
+            int32_t centi = (int32_t)remote->temp_half * 50;
+            if (remote->mode == AC_MODE_HEAT) {
+                user->heat_target_centi = clamp16(centi, offer->heat_min, offer->heat_max);
+                res->heat_sp = true;
+            } else {
+                user->cool_target_centi = clamp16(centi, offer->cool_min, offer->cool_max);
+                res->cool_sp = true;
+            }
+        }
+    } else {
+        res->mode_shown = false;
+        if (user->user_mode == CLIMATE_MODE_OFF) {
+            user->user_mode = CLIMATE_MODE_COOL;
+        }
+    }
+    if (remote->fan < AC_FAN_COUNT) {
+        user->fan = remote->fan;
+    }
+    if (offer->swing && remote->swing < AC_SWING_COUNT) {
+        user->swing = remote->swing;
+    }
+    res->fan = true;
 }
 
 const char *climate_reason_text(climate_reason_t r)

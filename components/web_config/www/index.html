@@ -404,6 +404,7 @@
       <dl class="kv">
         <dt>Đã phát IR</dt><dd id="ctl-last">-</dd>
         <dt>Đang chờ phát</dt><dd id="ctl-pending">-</dd>
+        <dt>Remote gốc</dt><dd id="ctl-remote">-</dd>
       </dl>
       <div id="ctl-error" class="err" hidden></div>
       <p class="note">Lệnh đi qua thermostat Matter nên ứng dụng nhà cũng thấy thay đổi. Profile thư viện tạo được mọi tổ hợp trong cấu hình của nó. Profile học thủ công chỉ phát được tổ hợp đã học; nếu chưa học đúng nhiệt độ, thiết bị dùng nhiệt độ đã học gần nhất cùng chế độ (không bao giờ đổi sang chế độ khác).</p>
@@ -427,6 +428,7 @@
         <label>Ngưỡng dữ liệu cũ tối thiểu (phút)<input name="stale_min" type="number" step="1" min="5" max="1440" required></label>
         <label class="check"><input type="checkbox" name="allow_local_fallback"> Dùng cảm biến cục bộ (dây) khi cảm biến Matter không khả dụng</label>
         <label class="check"><input type="checkbox" name="resend_on_boot"> Gửi lại trạng thái cuối sau khi mất điện</label>
+        <label class="check"><input type="checkbox" name="remote_sync"> Đồng bộ khi bấm remote gốc (bật/tắt, chế độ, nhiệt độ, quạt hiện lên ứng dụng nhà)</label>
         <div class="row"><button class="btn primary" type="submit">Lưu</button></div>
       </form>
     </div>

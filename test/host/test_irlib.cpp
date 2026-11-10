@@ -3,7 +3,8 @@
  *  - every command generated for a protocol is recognised again as that protocol and state,
  *  - also after passing through ir_capture like a real receiver capture (segments split at 12 ms
  *    of silence, demodulator stretching marks and shortening spaces),
- *  - unsupported / unknown signals are reported as such.
+ *  - unsupported / unknown signals are reported as such,
+ *  - presses of the original remote (Sharp) are read back as the state a library profile follows.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -145,6 +146,18 @@ void TestFanMapping()
     CHECK_EQ(ac_irlib_fan_to_lib(AC_FAN_2, 2), 4);
     CHECK_EQ(ac_irlib_fan_to_lib(AC_FAN_QUIET, 3), 1);
     CHECK_EQ(ac_irlib_fan_to_lib(AC_FAN_TURBO, 3), 5);
+
+    /* inverse: what the remote sent, read with the remote's number of speeds */
+    for (uint8_t levels = AC_IRLIB_FAN_LEVELS_MIN; levels <= AC_IRLIB_FAN_LEVELS_MAX; levels++) {
+        CHECK_EQ(ac_irlib_fan_from_lib(0, levels), AC_FAN_AUTO);
+        for (uint8_t f = AC_FAN_1; f < AC_FAN_1 + levels; f++) {
+            CHECK_EQ(ac_irlib_fan_from_lib(ac_irlib_fan_to_lib(f, levels), levels), f);
+        }
+    }
+    CHECK_EQ(ac_irlib_fan_from_lib(1, 3), AC_FAN_1);  /* kMin on a 3-speed remote: slowest   */
+    CHECK_EQ(ac_irlib_fan_from_lib(6, 3), AC_FAN_2);  /* kMediumHigh: tie, the slower speed  */
+    CHECK_EQ(ac_irlib_fan_from_lib(5, 2), AC_FAN_2);  /* kMax on a 2-speed remote: fastest   */
+    CHECK_EQ(ac_irlib_fan_from_lib(99, 3), AC_FAN_AUTO);
 }
 
 void TestProtocols()
@@ -266,6 +279,78 @@ void TestUnsupportedAndNoise()
     CHECK_EQ(ac_irlib_decode(&code, &d), AC_IRLIB_ERR_EMPTY);
 }
 
+/* The original remote of a Sharp AC (library profile SHARP_AC, 3 fan speeds, 18..30 C): each press,
+ * as captured by the receiver, gives back the state the profile follows. `prev` is the previous
+ * press, like the real remote (power-on-from-off and setting-change frames differ). */
+void TestRemoteFollow()
+{
+    const uint8_t kLevels3 = 3;
+    const uint8_t kMin = 36;
+    const uint8_t kMax = 60;
+    struct Press
+    {
+        ac_state_t state;
+        ac_state_t expect;
+    } presses[] = {
+        { { 1, AC_MODE_COOL, 48, AC_FAN_AUTO, AC_SWING_OFF }, { 1, AC_MODE_COOL, 48, AC_FAN_AUTO, AC_SWING_OFF } },
+        { { 1, AC_MODE_COOL, 52, AC_FAN_2, AC_SWING_OFF }, { 1, AC_MODE_COOL, 52, AC_FAN_2, AC_SWING_OFF } },
+        { { 1, AC_MODE_COOL, 52, AC_FAN_3, AC_SWING_OFF }, { 1, AC_MODE_COOL, 52, AC_FAN_3, AC_SWING_OFF } },
+        { { 1, AC_MODE_COOL, 32, AC_FAN_1, AC_SWING_OFF }, { 1, AC_MODE_COOL, kMin, AC_FAN_1, AC_SWING_OFF } },
+        { { 1, AC_MODE_HEAT, 44, AC_FAN_AUTO, AC_SWING_OFF }, { 1, AC_MODE_HEAT, 44, AC_FAN_AUTO, AC_SWING_OFF } },
+        /* Sharp fixes the temperature of Dry at its minimum (15 C): clamped to the profile range */
+        { { 1, AC_MODE_DRY, 50, AC_FAN_AUTO, AC_SWING_OFF }, { 1, AC_MODE_DRY, kMin, AC_FAN_AUTO, AC_SWING_OFF } },
+        { { 0, 0, 0, 0, 0 }, { 0, 0, 0, 0, 0 } },
+    };
+    ac_irlib_config_t cfg = Config(SHARP_AC);
+    cfg.fan_levels = kLevels3;
+    cfg.extra_flags = 0;
+    const ac_state_t * prev = nullptr;
+    for (const Press & p : presses) {
+        ir_code_t code;
+        ir_code_init(&code, gStore, kLevels, 0);
+        CHECK_EQ(ac_irlib_build(&cfg, &p.state, prev, &code), AC_IRLIB_OK);
+        ir_capture_t cap;
+        ir_code_t rx;
+        CHECK(Recapture(&code, &rx, &cap));
+        ac_irlib_detect_t d;
+        CHECK_EQ(ac_irlib_decode(&rx, &d), AC_IRLIB_OK);
+        CHECK(d.recognized);
+        CHECK_EQ(d.protocol, SHARP_AC);
+        ac_state_t got;
+        CHECK(ac_irlib_profile_state(&d, kLevels3, kMin, kMax, &got));
+        CHECK_EQ(got.power, p.expect.power);
+        if (p.expect.power) {
+            CHECK_EQ(got.mode, p.expect.mode);
+            CHECK_EQ(got.temp_half, p.expect.temp_half);
+            CHECK_EQ(got.fan, p.expect.fan);
+        } else {
+            CHECK(ac_state_equal(&got, &p.expect));
+        }
+        prev = &p.state;
+    }
+
+    /* A 5-speed remote (Daikin): every speed is read back as itself. */
+    ac_irlib_config_t dk = Config(DAIKIN);
+    dk.fan_levels = 5;
+    for (uint8_t f = AC_FAN_1; f <= AC_FAN_5; f++) {
+        const ac_state_t st = { 1, AC_MODE_COOL, 50, f, AC_SWING_OFF };
+        ir_code_t code;
+        ir_code_init(&code, gStore, kLevels, 0);
+        CHECK_EQ(ac_irlib_build(&dk, &st, nullptr, &code), AC_IRLIB_OK);
+        ac_irlib_detect_t d;
+        CHECK_EQ(ac_irlib_decode(&code, &d), AC_IRLIB_OK);
+        ac_state_t got;
+        CHECK(ac_irlib_profile_state(&d, 5, kMin, kMax, &got));
+        CHECK_EQ(got.fan, f);
+    }
+
+    /* Commands without state are not followed. */
+    ac_irlib_detect_t none;
+    memset(&none, 0, sizeof(none));
+    ac_state_t got;
+    CHECK(!ac_irlib_profile_state(&none, 3, kMin, kMax, &got));
+}
+
 } // namespace
 
 int main()
@@ -276,7 +361,7 @@ int main()
     } suites[] = {
         { "irlib_fan", TestFanMapping },     { "irlib_protocols", TestProtocols },
         { "irlib_power_off", TestPowerOff }, { "irlib_models", TestModelsAndNames },
-        { "irlib_unknown", TestUnsupportedAndNoise },
+        { "irlib_unknown", TestUnsupportedAndNoise }, { "irlib_remote", TestRemoteFollow },
     };
     for (auto & s : suites) {
         int before = g_failures;

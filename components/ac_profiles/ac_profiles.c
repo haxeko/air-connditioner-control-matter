@@ -1,5 +1,6 @@
 #include "ac_profiles.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,6 +54,14 @@ static void ns_name(int slot, char *out, size_t len)
 static bool slot_ok(int slot)
 {
     return slot >= 0 && slot < AC_PROFILE_SLOTS;
+}
+
+static void set_why(char *why, size_t len, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(why, len, fmt, ap);
+    va_end(ap);
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -109,12 +118,59 @@ static esp_err_t raw_encode(int slot, const ac_state_t *state, const ac_state_t 
     return ESP_OK;
 }
 
+/* The learned commands were captured by the same receiver, so a press of the original remote matches
+ * its learned command level by level (25 %, at least 200 us). Only blobs of the same size (same
+ * number of segments and levels) are loaded and compared. */
+static esp_err_t raw_decode(int slot, const ir_code_t *code, ac_state_t *state, char *why, size_t why_len)
+{
+    lock();
+    size_t n = s_slots[slot].present ? s_slots[slot].count : 0;
+    unlock();
+    if (n == 0) {
+        set_why(why, why_len, "profile chưa có lệnh đã học");
+        return ESP_ERR_NOT_FOUND;
+    }
+    const size_t want = ir_code_serialized_size(code);
+    ac_state_t *list = malloc(n * sizeof(ac_state_t));
+    uint8_t *buf = malloc(want);
+    uint16_t *levels = malloc((size_t)code->total_levels * sizeof(uint16_t));
+    esp_err_t result = ESP_ERR_NO_MEM;
+    if (list != NULL && buf != NULL && levels != NULL) {
+        result = ESP_ERR_NOT_FOUND;
+        n = ac_profiles_list_codes(slot, list, n);
+        for (size_t i = 0; i < n && result == ESP_ERR_NOT_FOUND; i++) {
+            size_t need = 0;
+            if (ac_profiles_load_code(slot, &list[i], NULL, &need) != ESP_ERR_INVALID_SIZE || need != want) {
+                continue;
+            }
+            if (ac_profiles_load_code(slot, &list[i], buf, &need) != ESP_OK) {
+                continue;
+            }
+            ir_code_t learned;
+            ir_code_init(&learned, levels, code->total_levels, 0);
+            if (ir_code_deserialize(&learned, buf, need) == IR_OK && ir_code_similar(code, &learned, 25, 200)) {
+                *state = list[i];
+                result = ESP_OK;
+            }
+        }
+        if (result == ESP_ERR_NOT_FOUND) {
+            set_why(why, why_len, "không khớp lệnh đã học nào (%u đoạn, %u mức)", code->segment_count,
+                    code->total_levels);
+        }
+    }
+    free(list);
+    free(buf);
+    free(levels);
+    return result;
+}
+
 static const ac_protocol_driver_t k_raw_driver = {
     .driver_id = AC_DRIVER_RAW,
     .name = "Raw (học từ remote)",
     .get_caps = raw_get_caps,
     .resolve = raw_resolve,
     .encode = raw_encode,
+    .decode = raw_decode,
 };
 
 /* ------------------------------------------------------------------------------------------ */
@@ -298,12 +354,47 @@ static esp_err_t lib_encode(int slot, const ac_state_t *state, const ac_state_t 
     return lib_build_blob(&l, state, prev, blob, len, NULL);
 }
 
+static esp_err_t lib_decode(int slot, const ir_code_t *code, ac_state_t *state, char *why, size_t why_len)
+{
+    lock();
+    ac_profile_meta_t meta = s_slots[slot].meta;
+    bool present = s_slots[slot].present;
+    unlock();
+    if (!present) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    ac_profile_lib_t l;
+    lib_from_meta(&meta, &l);
+    ac_irlib_detect_t d;
+    ac_irlib_result_t r = ac_irlib_decode(code, &d);
+    if (r == AC_IRLIB_ERR_NO_MEM) {
+        return ESP_ERR_NO_MEM;
+    }
+    if (r != AC_IRLIB_OK || !d.recognized) {
+        set_why(why, why_len, "không nhận ra giao thức (%u đoạn, %u mức)", code->segment_count, code->total_levels);
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (d.protocol != l.protocol) {
+        char want[AC_IRLIB_NAME_LEN];
+        ac_irlib_protocol_name(l.protocol, want, sizeof(want));
+        set_why(why, why_len, "giao thức %s, profile dùng %s", d.protocol_name, want);
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (!d.has_state) {
+        set_why(why, why_len, "lệnh %s không mang trạng thái máy lạnh", d.protocol_name);
+        return ESP_ERR_NOT_FOUND;
+    }
+    return ac_irlib_profile_state(&d, l.fan_levels, l.temp_min_half, l.temp_max_half, state) ? ESP_OK
+                                                                                            : ESP_ERR_NOT_FOUND;
+}
+
 static const ac_protocol_driver_t k_lib_driver = {
     .driver_id = AC_DRIVER_IRLIB,
     .name = "Thư viện IR (nhận diện tự động)",
     .get_caps = lib_get_caps,
     .resolve = lib_resolve,
     .encode = lib_encode,
+    .decode = lib_decode,
 };
 
 static const ac_protocol_driver_t *const k_registry[] = {
@@ -789,6 +880,49 @@ esp_err_t ac_profiles_build_command(const ac_state_t *desired, const ac_state_t 
         return err;
     }
     return drv->encode(slot, chosen, prev, blob, len);
+}
+
+esp_err_t ac_profiles_decode_remote(const uint8_t *blob, size_t len, ac_state_t *state, char *why, size_t why_len)
+{
+    char dummy[1];
+    if (why == NULL || why_len == 0) {
+        why = dummy;
+        why_len = sizeof(dummy);
+    }
+    why[0] = 0;
+    if (blob == NULL || state == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    int slot = s_active;
+    if (!slot_ok(slot)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    ac_profile_meta_t meta;
+    esp_err_t err = ac_profiles_get_meta(slot, &meta);
+    if (err != ESP_OK) {
+        return err;
+    }
+    const ac_protocol_driver_t *drv = ac_protocol_find(meta.driver);
+    if (drv == NULL || drv->decode == NULL) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    uint16_t total = 0;
+    if (ir_code_validate_blob(blob, len, &total) != IR_OK || total == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t *levels = malloc((size_t)total * sizeof(uint16_t));
+    if (levels == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    ir_code_t code;
+    ir_code_init(&code, levels, total, 0);
+    if (ir_code_deserialize(&code, blob, len) != IR_OK) {
+        err = ESP_ERR_INVALID_ARG;
+    } else {
+        err = drv->decode(slot, &code, state, why, why_len);
+    }
+    free(levels);
+    return err;
 }
 
 esp_err_t ac_profiles_create_library(int slot, const char *name, const ac_profile_lib_t *lib, bool lock_it)

@@ -2,6 +2,7 @@
  * AC Matter IR controller - application entry point and glue between the modules.
  *
  *   hub (Fabric A) --Thermostat writes--> matter_thermostat --> climate_control --> ac_profiles --> ir_transceiver
+ *   original remote --> ir_transceiver (monitor) --> climate_control (decode) --> matter_thermostat (shown only)
  *   sensor (Fabric B) --subscription--> remote_temperature --> LocalTemperature + climate_control
  *   BOOT x2 --> button_handler --> Matter pairing mode (commissioning window), status LED blinks blue
  *   BOOT x3 --> button_handler --> wifi_config (SoftAP) --> web_config (portal, started once)
@@ -56,6 +57,20 @@ static void on_matter_fan(uint8_t fan, uint8_t swing)
 static void on_thermostat_change(const thermostat_user_state_t * s, uint32_t mask)
 {
     climate_control_on_user_change(s->system_mode, s->cool_setpoint, s->heat_setpoint, mask);
+}
+
+/* Climate task: the original remote changed the AC; show it in the home apps (nothing is sent back). */
+static void on_remote_update(const climate_remote_update_t * u)
+{
+    thermostat_user_state_t s = {};
+    s.system_mode   = u->user_mode;
+    s.cool_setpoint = u->cool_target_centi;
+    s.heat_setpoint = u->heat_target_centi;
+    esp_err_t err   = matter_thermostat_show_remote_state(&s, u->mask, u->has_fan, u->fan, u->swing);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) /* INVALID_STATE: Matter not started yet */
+    {
+        app_log_error("app", "remote state not shown in Matter: %s", esp_err_to_name(err));
+    }
 }
 
 /* Effective room temperature (Matter sensor, optional local fallback, or none). */
@@ -185,6 +200,7 @@ extern "C" void app_main(void)
 
     /* IR is not fatal: the thermostat still works (and reports why nothing is transmitted). */
     non_fatal("IR transceiver", ir_transceiver_init());
+    climate_control_set_remote_callback(on_remote_update);
     ESP_ERROR_CHECK(climate_control_start(&cfg));
 
     ESP_ERROR_CHECK(matter_thermostat_create(&caps, on_thermostat_change));

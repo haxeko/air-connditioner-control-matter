@@ -125,6 +125,15 @@ void ac_profiles_thermostat_limits(int slot, ac_thermostat_limits_t *out);
 esp_err_t ac_profiles_build_command(const ac_state_t *desired, const ac_state_t *prev, uint8_t user_target_half,
                                     ac_state_t *chosen, ac_resolve_kind_t *kind, uint8_t **blob, size_t *len);
 
+/**
+ * State the original remote just put the AC in, for the ACTIVE profile. `blob` is a serialized ir_code
+ * (as captured by the receiver). A library profile decodes its own protocol (fan speed mapped to the
+ * fan levels of the profile, temperature clamped to its range); a raw profile looks for the learned
+ * command that matches. ESP_ERR_NOT_FOUND when the command is not one of this AC; `why` (optional)
+ * then describes what was received, for the log.
+ */
+esp_err_t ac_profiles_decode_remote(const uint8_t *blob, size_t len, ac_state_t *state, char *why, size_t why_len);
+
 #ifdef __cplusplus
 }
 #endif

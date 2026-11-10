@@ -8,7 +8,10 @@
  *     "buffer too small" errors instead of silent truncation;
  *   - transmission: a single "pending" slot (latest full-state command wins), duplicate filter,
  *     minimum pause between commands. "Sent" only means the LED emitted the frame: an IR remote
- *     link is one-way, the AC does not acknowledge.
+ *     link is one-way, the AC does not acknowledge;
+ *   - monitoring: between learning sessions the receiver keeps listening, so every command of the
+ *     original remote is handed to the application (it follows the state of the AC). The receiver
+ *     is off while this device transmits, so its own commands are never reported.
  */
 
 #include <stdbool.h>
@@ -79,6 +82,25 @@ void ir_tx_get_status(ir_tx_status_t *out);
 
 /** Carrier for subsequent transmissions (profile may override the Kconfig default). */
 esp_err_t ir_set_carrier(uint16_t carrier_hz);
+
+/**
+ * A complete command received while monitoring (serialized ir_code blob, see ir_code.h). Runs on the
+ * IR task: the callback owns `blob` (free() it) and must not block.
+ */
+typedef void (*ir_monitor_cb_t)(uint8_t *blob, size_t len);
+
+typedef struct {
+    bool enabled;        /* requested by the application                         */
+    bool listening;      /* receiver armed for the remote right now               */
+    uint32_t commands;   /* commands handed to the callback                       */
+    uint32_t discarded;  /* noise, over-long or unreadable captures               */
+    int64_t last_us;     /* time of the last command handed over, 0 = none        */
+} ir_monitor_status_t;
+
+/** Listen for the original remote outside learning sessions (replaces a previous callback). */
+esp_err_t ir_monitor_start(ir_monitor_cb_t cb);
+void ir_monitor_stop(void);
+void ir_monitor_get_status(ir_monitor_status_t *out);
 
 #ifdef __cplusplus
 }

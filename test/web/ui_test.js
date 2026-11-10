@@ -112,6 +112,8 @@ function check(cond, what) {
     await page.click('#ctl-form button[type=submit]');
     await page.waitForSelector('#toast:not(.error)');
     check(true, 'manual control sent through the thermostat');
+    await page.waitForFunction(() => document.getElementById('ctl-remote').textContent.startsWith('Lạnh 26'));
+    check((await txt('#ctl-remote')).includes('bỏ qua lệnh cuối: giao thức NEC'), 'original remote state and last ignored command shown');
 
     // ---------------------------------------------------------------- Remote recognition (IR library)
     await page.click('#det-start');
@@ -138,10 +140,17 @@ function check(cond, what) {
     await page.click('#tabs button[data-page=algo]');
     await page.waitForFunction(() => document.querySelector('#algo-form input[name=deadband]').value !== '');
     check((await page.inputValue('#algo-form input[name=deadband]')) === '0.5', 'deadband shown in C');
+    check(await page.isChecked('#algo-form input[name=remote_sync]'), 'remote sync on by default');
     await page.fill('#algo-form input[name=deadband]', '0.6');
+    await page.uncheck('#algo-form input[name=remote_sync]');
     await page.click('#algo-form button[type=submit]');
     await page.waitForFunction(() => document.getElementById('toast').textContent.includes('Đã lưu thuật toán'));
     check(true, 'algorithm settings saved');
+    check(!(await page.isChecked('#algo-form input[name=remote_sync]')), 'remote sync switched off');
+    await page.click('#tabs button[data-page=ac]');
+    await page.waitForFunction(() => document.getElementById('ctl-remote').textContent.startsWith('không theo dõi'), null, { timeout: 8000 });
+    check(true, 'control card shows that the remote is not followed');
+    await page.click('#tabs button[data-page=algo]');
     await shot('07-algo');
 
     // ---------------------------------------------------------------- Diagnostics

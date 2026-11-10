@@ -76,6 +76,7 @@ uint8_t sSpeedCount;
 bool sHasFanCluster;
 uint8_t sLastOnMode = TSTAT_MODE_COOL;
 bool sSyncing; /* writes made by this file: ignore the resulting callbacks */
+bool sFromRemote; /* thermostat writes that show the state set with the IR remote: no user callback */
 
 void NotifyUi(matter_ui_event_t ev)
 {
@@ -363,7 +364,7 @@ esp_err_t AttributeCallback(attribute::callback_type_t type, uint16_t endpoint_i
             mask = TSTAT_CHANGED_HEAT_SP;
         }
     }
-    if (mask && !sRestoring) {
+    if (mask && !sRestoring && !sFromRemote) {
         NotifyUser(mask);
     }
     if (mask == TSTAT_CHANGED_MODE && sStarted) {
@@ -598,11 +599,16 @@ struct UserStateRequest
 {
     thermostat_user_state_t state;
     uint32_t mask;
+    bool fromRemote;
+    bool hasFan;
+    uint8_t fan;
+    uint8_t swing;
 };
 
 void SetUserStateWork(intptr_t arg)
 {
     auto * req = reinterpret_cast<UserStateRequest *>(arg);
+    sFromRemote = req->fromRemote; /* attribute::update() runs the callbacks synchronously */
     if (req->mask & TSTAT_CHANGED_MODE) {
         esp_matter_attr_val_t v = esp_matter_enum8(req->state.system_mode);
         attribute::update(sEndpointId, Thermostat::Id, Thermostat::Attributes::SystemMode::Id, &v);
@@ -614,6 +620,15 @@ void SetUserStateWork(intptr_t arg)
     if ((req->mask & TSTAT_CHANGED_HEAT_SP) && sCaps.heat) {
         esp_matter_attr_val_t v = esp_matter_int16(req->state.heat_setpoint);
         attribute::update(sEndpointId, Thermostat::Id, Thermostat::Attributes::OccupiedHeatingSetpoint::Id, &v);
+    }
+    sFromRemote = false;
+    if (req->hasFan) {
+        {
+            Guard g;
+            sFan = req->fan;
+            sSwing = req->swing;
+        }
+        SyncPowerAndFan(); /* sSyncing: the fan delegate does not report it back */
     }
     chip::Platform::Delete(req);
 }
@@ -890,6 +905,43 @@ extern "C" esp_err_t matter_thermostat_set_user_state(const thermostat_user_stat
     }
     req->state = *state;
     req->mask = mask;
+    req->fromRemote = false;
+    req->hasFan = false;
+    if (chip::DeviceLayer::PlatformMgr().ScheduleWork(SetUserStateWork, reinterpret_cast<intptr_t>(req)) != CHIP_NO_ERROR) {
+        chip::Platform::Delete(req);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+extern "C" esp_err_t matter_thermostat_show_remote_state(const thermostat_user_state_t * state, uint32_t mask,
+                                                         bool has_fan, uint8_t fan, uint8_t swing)
+{
+    if (!sStarted) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (state == nullptr || fan >= AC_FAN_COUNT || swing >= AC_SWING_COUNT) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    auto * req = chip::Platform::New<UserStateRequest>();
+    if (req == nullptr) {
+        return ESP_ERR_NO_MEM;
+    }
+    req->state = *state;
+    req->mask = mask & (TSTAT_CHANGED_MODE | TSTAT_CHANGED_COOL_SP | TSTAT_CHANGED_HEAT_SP);
+    if ((req->mask & TSTAT_CHANGED_MODE) && !ModeAllowed(state->system_mode)) {
+        req->mask &= ~TSTAT_CHANGED_MODE;
+    }
+    req->state.cool_setpoint = Clamp(state->cool_setpoint, sCaps.cool_min, sCaps.cool_max);
+    if (sCaps.heat) {
+        req->state.heat_setpoint = Clamp(state->heat_setpoint, sCaps.heat_min, sCaps.heat_max);
+    } else {
+        req->mask &= ~TSTAT_CHANGED_HEAT_SP;
+    }
+    req->fromRemote = true;
+    req->hasFan = has_fan;
+    req->fan = fan;
+    req->swing = swing;
     if (chip::DeviceLayer::PlatformMgr().ScheduleWork(SetUserStateWork, reinterpret_cast<intptr_t>(req)) != CHIP_NO_ERROR) {
         chip::Platform::Delete(req);
         return ESP_FAIL;

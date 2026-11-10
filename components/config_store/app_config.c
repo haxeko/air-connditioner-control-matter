@@ -15,6 +15,7 @@ void app_config_defaults(app_config_t *cfg)
     cfg->filter_tau_s = 180;      /* 3 min  */
     cfg->user_debounce_ms = 1500;
     cfg->resend_on_boot = 0;
+    cfg->remote_sync_off = 0;     /* follow the original remote */
     cfg->stale_min_s = 900;       /* 15 min */
 }
 
@@ -32,7 +33,7 @@ bool app_config_validate(const app_config_t *cfg, const char **why)
         *why = "control_mode";
         return false;
     }
-    if (cfg->allow_local_fallback > 1 || cfg->resend_on_boot > 1) {
+    if (cfg->allow_local_fallback > 1 || cfg->resend_on_boot > 1 || cfg->remote_sync_off > 1) {
         *why = "flags";
         return false;
     }

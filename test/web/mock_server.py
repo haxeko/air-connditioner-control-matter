@@ -45,7 +45,7 @@ STATE = {
     "ir": {"sent": 3, "failed": 0, "last": "Lạnh 25°C, quạt tự động, đảo gió tắt", "t": time.time() - 90, "src": 0},
     "config": {"control_mode": 1, "allow_local_fallback": True, "deadband_centi": 50, "max_offset_centi": 300,
                "comp_interval_s": 600, "filter_tau_s": 180, "user_debounce_ms": 1500, "resend_on_boot": False,
-               "stale_min_s": 900},
+               "remote_sync": True, "stale_min_s": 900},
     "errors": [{"t": time.time() - 300, "module": "remote_temp", "msg": "CASE tới cảm biến thất bại, thử lại sau 10 s"}],
 }
 
@@ -105,6 +105,7 @@ def lib_caps(lib):
 
 def climate():
     th = STATE["thermostat"]
+    locked = bool(STATE["profiles"][0].get("locked", False))
     desired = "off" if th["mode"] == 0 else f"m0t{th['cool_sp'] // 50}f{STATE['fan']}s{STATE['swing']}"
     return {"running": True, "ready": STATE["profiles"][0].get("locked", False), "not_ready":
             "" if STATE["profiles"][0].get("locked") else "Profile chưa được khóa (xác nhận) sau khi học",
@@ -114,7 +115,10 @@ def climate():
             "compensating": True, "offset": -100, "ir_setpoint": 2400, "reason": 5,
             "reason_text": "Đã chỉnh setpoint IR một bước", "desired": state_obj(desired), "has_sent": True,
             "last_sent": state_obj("m0t48f0s0"), "last_kind": 1, "last_sent_age_s": 90, "pending_ms": 0,
-            "last_error": ""}
+            "last_error": "", "remote_enabled": locked and STATE["config"]["remote_sync"],
+            "remote_listening": locked and STATE["config"]["remote_sync"], "remote_count": 2, "remote_ignored": 1,
+            "has_remote": True, "last_remote": state_obj("m0t52f1s0"), "last_remote_age_s": 40,
+            "remote_note": "giao thức NEC, profile dùng SHARP_AC"}
 
 
 def ir():
@@ -422,7 +426,7 @@ def route(method, path, q, f):
                   "user_debounce_ms", "stale_min_s"):
             if g(k) is not None:
                 c[k] = int(g(k))
-        for k in ("allow_local_fallback", "resend_on_boot"):
+        for k in ("allow_local_fallback", "resend_on_boot", "remote_sync"):
             if g(k) is not None:
                 c[k] = g(k) == "1"
         require(10 <= c["deadband_centi"] <= 300, 400, "Vùng chết phải từ 0,1 đến 3 °C")

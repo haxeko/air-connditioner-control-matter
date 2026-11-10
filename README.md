@@ -4,20 +4,37 @@ Firmware ESP-IDF thuần (không Arduino, không ESPHome, không Home Assistant/
 ESP32-S3 N16R8:
 
 - xuất hiện trong Google Home, Apple Home, SmartThings, Alexa, Aqara Home, Home Assistant… dưới dạng
-  **máy lạnh / Matter Thermostat** tên **`May lanh IR v1.3.0`** (Tắt/Làm lạnh, Sưởi/Khô/Quạt khi profile máy
+  **máy lạnh / Matter Thermostat** tên **`May lanh IR v1.4.0`** (Tắt/Làm lạnh, Sưởi/Khô/Quạt khi profile máy
   lạnh có các chế độ đó; tốc độ quạt và đảo gió qua cluster Fan Control);
 - tự tạo **fabric riêng (Fabric B)** để ghép cảm biến nhiệt độ Matter đã có trong nhà bằng Multi-Admin,
   rồi **subscribe** trực tiếp nhiệt độ của cảm biến (kể cả cảm biến Thread qua Border Router sẵn có);
 - điều khiển máy lạnh bằng hồng ngoại (RMT native của ESP-IDF): **bấm remote một lần để tự nhận diện giao
   thức** (thư viện IRremoteESP8266, hơn 80 giao thức máy lạnh) rồi firmware tự tạo mọi lệnh, hoặc **học từng
   lệnh từ remote gốc** cho máy không có trong thư viện;
+- **vẫn dùng remote gốc được**: mắt thu luôn nghe, bấm remote thì trạng thái mới (bật/tắt, chế độ, nhiệt độ,
+  quạt, đảo gió) hiện lên Apple Home/Google Home… và lệnh sau từ ứng dụng nối tiếp đúng trạng thái đó;
 - **nhấn BOOT 2 lần** để vào **chế độ ghép Matter** (LED RGB nháy xanh dương): ứng dụng nhà tìm thấy
   thiết bị **qua Bluetooth** (và qua Wi-Fi nhà nếu ESP đã vào mạng), thêm bằng **mã QR hoặc mã 11 số**;
   ứng dụng tự gửi Wi-Fi nhà cho ESP qua Bluetooth;
 - **nhấn BOOT 3 lần** để mở Wi-Fi cấu hình và trang web tiếng Việt tại `http://192.168.4.1`;
 - lưu mọi cấu hình vào flash: mất điện không phải thiết lập lại;
-- mọi tên thiết bị phát ra đều có **hậu tố phiên bản firmware** (`v1.3.0`): tên Matter, tên Bluetooth
-  `AC-XXXX-v1.3.0`, Wi-Fi cấu hình `AC-Matter-XXXX-v1.3.0` – nhìn tên là biết thiết bị đang chạy bản nào.
+- mọi tên thiết bị phát ra đều có **hậu tố phiên bản firmware** (`v1.4.0`): tên Matter, tên Bluetooth
+  `AC-XXXX-v1.4.0`, Wi-Fi cấu hình `AC-Matter-XXXX-v1.4.0` – nhìn tên là biết thiết bị đang chạy bản nào.
+
+### Có gì mới trong v1.4.0
+
+- **Đồng bộ khi bấm remote gốc**: v1.3.0 chỉ dùng mắt thu lúc học/nhận diện, nên bấm remote thì máy lạnh đổi
+  nhưng ESP và ứng dụng nhà không biết. Từ v1.4.0, khi profile đang dùng **đã khóa**, mắt thu nghe liên tục:
+  lệnh của remote được giải mã theo profile (profile thư viện: đúng giao thức, ví dụ `SHARP_AC`; profile học
+  thủ công: so với các lệnh đã học), rồi trạng thái mới được hiển thị trong ứng dụng nhà (SystemMode,
+  nhiệt độ đặt, On/Off, quạt, đảo gió) **mà không phát lại IR**. Lệnh tiếp theo từ ứng dụng dùng trạng thái
+  đó làm trạng thái trước (quan trọng với giao thức “đảo trạng thái” như Sharp). Chi tiết ở
+  [mục 7.4](#74-ir), tắt được ở tab Thuật toán (*Đồng bộ khi bấm remote gốc*).
+- Trang Máy lạnh có dòng **Remote gốc**: trạng thái remote đặt lần cuối, hoặc lý do lệnh cuối bị bỏ qua (ví dụ
+  `giao thức NEC, profile dùng SHARP_AC` khi bấm remote TV). Lệnh `status` có dòng `Remote  :`.
+- Thêm kiểm tra trên máy tính: chuỗi bấm remote Sharp (bật, đổi nhiệt độ, quạt, Sưởi, Khô, Tắt) qua mô phỏng
+  mắt thu được đọc lại đúng trạng thái; trạng thái remote → trạng thái thermostat; sau khi bấm remote thuật
+  toán không phát lại lệnh (cả chế độ Theo cảm biến ngoài).
 
 ### Có gì mới trong v1.3.0
 
@@ -298,7 +315,7 @@ idf.py build
 Lần build đầu, component manager tải `esp_matter 1.6.1` và các phụ thuộc đúng như `dependencies.lock`
 (cần Internet; các lần sau không cần). Build toàn bộ connectedhomeip mất khá lâu (10–30 phút).
 
-Đóng gói file `.bin` dựng sẵn (tên có hậu tố phiên bản, ví dụ `ac_matter_ir_v1.3.0_app_0x40000.bin`) vào
+Đóng gói file `.bin` dựng sẵn (tên có hậu tố phiên bản, ví dụ `ac_matter_ir_v1.4.0_app_0x40000.bin`) vào
 `firmware/`: `python tools/package_firmware.py`.
 
 Nâng cấp thư mục đã build bản cũ (v1.0.0 không có Bluetooth): xóa `sdkconfig` để áp dụng
@@ -347,7 +364,7 @@ Playwright): `node test/web/ui_test.js http://127.0.0.1:8080/`.
 
 ### Bước 1 – Wi-Fi cấu hình và mật khẩu
 
-Mỗi thiết bị phát Wi-Fi cấu hình có SSID riêng `AC-Matter-XXXX-v1.3.0` (4 ký tự cuối MAC + phiên bản
+Mỗi thiết bị phát Wi-Fi cấu hình có SSID riêng `AC-Matter-XXXX-v1.4.0` (4 ký tự cuối MAC + phiên bản
 firmware). Mật khẩu mặc định
 (cố định, đặt bằng `CONFIG_APP_AP_PASSWORD` trong `sdkconfig.defaults`) là:
 
@@ -372,7 +389,7 @@ dùng và mã ghép Matter (kèm QR vẽ bằng ký tự). Các lệnh khác: `s
 
 1. Lần đầu (chưa có Wi-Fi) thiết bị tự phát Wi-Fi cấu hình. Các lần sau: **nhấn BOOT 3 lần nhanh** (trong
    1,5 s). 1–2 lần nhấn không làm gì; nhấn khi đang mở chỉ gia hạn thời gian.
-2. Điện thoại kết nối `AC-Matter-XXXX-v1.3.0`. Nếu điện thoại báo “không có Internet”, chọn **giữ kết nối**.
+2. Điện thoại kết nối `AC-Matter-XXXX-v1.4.0`. Nếu điện thoại báo “không có Internet”, chọn **giữ kết nối**.
 3. Mở `http://192.168.4.1` → tab **Wi-Fi** → *Quét mạng* → chọn mạng 2,4 GHz → nhập mật khẩu → **Lưu**.
 4. Chờ “Đã kết nối mạng mới”. Nếu sai mật khẩu, sau 40 s thiết bị tự quay lại mạng cũ (nếu có).
 
@@ -385,15 +402,15 @@ biến không bị gián đoạn.
    để in tem dán lên thiết bị), hoặc lệnh `secrets` trên cổng serial. Mã là cố định cho từng thiết bị (tạo
    ngẫu nhiên ở lần khởi động đầu, lưu NVS).
 2. Bật **chế độ ghép**: **nhấn nút BOOT 2 lần** (trong 1,5 s) → LED **nháy xanh dương** trong suốt thời gian
-   cho phép ghép (15 phút). Trong thời gian này ESP **phát Bluetooth** (tên `AC-XXXX-v1.3.0`) và, nếu đã vào
-   Wi-Fi nhà, quảng bá DNS-SD `_matterc._udp` (tên `May lanh IR v1.3.0`). ESP chưa có Wi-Fi vẫn ghép được qua
+   cho phép ghép (15 phút). Trong thời gian này ESP **phát Bluetooth** (tên `AC-XXXX-v1.4.0`) và, nếu đã vào
+   Wi-Fi nhà, quảng bá DNS-SD `_matterc._udp` (tên `May lanh IR v1.4.0`). ESP chưa có Wi-Fi vẫn ghép được qua
    Bluetooth. Khi thiết bị chưa thuộc hệ sinh thái nào, chế độ ghép tự bật 15 phút sau mỗi lần khởi động. Cũng
    có thể bật bằng nút *Mở cửa sổ ghép* trên web hoặc lệnh `pairing`.
 3. Trên điện thoại: **bật Bluetooth**, kết nối **Wi-Fi nhà 2,4 GHz** (ESP32 không dùng được 5 GHz; **không**
    kết nối Wi-Fi cấu hình `AC-Matter-…` khi ghép), đứng gần thiết bị. Trong Google Home / Apple Home /
    SmartThings / Alexa / Home Assistant: *Thêm thiết bị → Matter*, quét QR hoặc nhập mã số. Ứng dụng gửi
    Wi-Fi nhà qua Bluetooth, ESP vào mạng và ứng dụng hoàn tất qua Wi-Fi. Ghép xong, LED sáng xanh lá 2 s rồi
-   tắt; thiết bị hiện tên `May lanh IR v1.3.0` (đổi tên trong ứng dụng thì tên mới được giữ).
+   tắt; thiết bị hiện tên `May lanh IR v1.4.0` (đổi tên trong ứng dụng thì tên mới được giữ).
 4. Firmware dùng **chứng thư thiết bị thử nghiệm của SDK** (VID 0xFFF1): ứng dụng sẽ cảnh báo “thiết bị
    chưa được chứng nhận” – chọn vẫn thêm. Một số ứng dụng cần bật chế độ nhà phát triển/thiết bị thử nghiệm.
 5. Muốn thêm vào hệ sinh thái thứ hai: dùng chức năng chia sẻ (Multi-Admin) của hệ sinh thái thứ nhất, hoặc
@@ -426,6 +443,9 @@ biến không bị gián đoạn.
 
 Không nhận ra giao thức, nhận ra nhưng là remote TV/quạt, hoặc máy không phản hồi lệnh thử: dùng bước 4b.
 Muốn đổi cấu hình profile thư viện: mở khóa, xóa, nhận diện lại (chỉ cần bấm remote một lần).
+
+Sau khi lưu (profile đã khóa), remote gốc vẫn dùng bình thường: bấm remote thì ứng dụng nhà đổi theo trong
+khoảng 1 giây (dòng *Remote gốc* trên trang Máy lạnh cho biết lệnh cuối nhận được, hoặc vì sao bị bỏ qua).
 
 ### Bước 4b – Học từng lệnh IR và khóa profile
 
@@ -520,6 +540,11 @@ học IR hoặc thử Wi-Fi mới).
   Cảm biến không hợp lệ → độ bù về 0 (như Direct). Đổi chế độ hoặc Tắt → xóa độ bù.
 - Thay đổi liên tiếp từ ứng dụng được gộp (mặc định 1,5 s) trước khi phát.
 - Máy lạnh vẫn tự điều chỉnh theo cảm biến bên trong của nó; firmware **không** giả lập Follow-Me/I-Feel.
+- **Bấm remote gốc** (khi profile đã khóa, tùy chọn *Đồng bộ khi bấm remote gốc* bật – mặc định): trạng thái
+  của remote thành trạng thái người dùng (như chọn trong ứng dụng) và thành “trạng thái đã gửi”, nên không
+  có lệnh IR nào được phát lại; lệnh đang chờ gộp bị hủy (remote thắng). Ở chế độ Theo cảm biến ngoài, độ bù
+  về 0 và chỉ bù lại sau một chu kỳ bù. Logic ánh xạ là hàm thuần `climate_user_from_remote()` (test trên
+  máy tính).
 
 ### 7.4 IR
 
@@ -543,7 +568,8 @@ Nhận diện và tạo lệnh (`components/ac_profiles/ac_irlib.cpp`, thuần C
   cao). Đảo gió = đảo dọc tự động.
 - Giao thức gửi “đảo trạng thái” (nguồn hoặc đảo gió của Kelon, Sharp, Whirlpool, Coolix…) cần biết trạng
   thái đã gửi trước đó: firmware truyền trạng thái gửi lần trước (lưu trong flash, còn sau khi mất điện).
-  Nếu máy lạnh bị chỉnh bằng remote gốc, trạng thái đó có thể lệch: dùng *Gửi lại trạng thái hiện tại*.
+  Từ v1.4.0 trạng thái do remote gốc đặt cũng được ghi vào đó (xem *Theo dõi remote gốc* dưới đây); nếu remote
+  bấm lúc ESP mất điện hoặc bị che mắt thu thì vẫn có thể lệch: dùng *Gửi lại trạng thái hiện tại*.
 - Model: giao thức có nhiều model cần model hợp lệ (model -1 làm vài giao thức như Fujitsu tạo khung sai), nên
   khi chưa chọn firmware dùng model đầu tiên.
 
@@ -561,6 +587,23 @@ Thu và lưu lệnh raw:
 - Web phân biệt “đã phát IR” (LED đã phát) với “máy lạnh đã nhận” (không thể biết).
 - Interface `ac_protocol_driver_t` (`components/ac_profiles/include/ac_protocol.h`): driver RAW (lệnh đã học)
   và IRLIB (thư viện); không có encoder tự chế.
+
+Theo dõi remote gốc (từ v1.4.0):
+
+- `ir_transceiver` có chế độ **monitor**: ngoài lúc học, bộ thu RMT luôn bật với cùng bộ ghép đoạn như khi
+  học; một lệnh kết thúc sau 400 ms im lặng (`CONFIG_APP_IR_LEARN_END_GAP_MS`), dưới 16 mức là nhiễu, kéo dài
+  quá 3 s không ngắt là nhiễu đèn/nắng – đều bị bỏ. Bộ thu **tắt trong lúc ESP phát** và bỏ qua 60 ms ngay sau
+  đó, nên lệnh của chính ESP không bao giờ bị coi là remote. Bộ đệm thu (4 KB RAM trong, 12 KB PSRAM) cấp
+  một lần lúc khởi động, dùng chung với chế độ học.
+- `ac_profiles_decode_remote()`: profile thư viện giải mã bằng `ac_irlib_decode()` và chỉ nhận **đúng giao
+  thức của profile** có mang trạng thái; quạt đọc theo số mức quạt của remote (`ac_irlib_fan_from_lib()`),
+  nhiệt độ cắt theo dải của profile (`ac_irlib_profile_state()`, test trên máy tính). Profile học thủ công so
+  lệnh thu được với từng lệnh đã học cùng kích thước (mỗi mức sai lệch ≤ 25 % hoặc ≤ 200 µs).
+- `climate_control` (task 8 KB, giải mã chạy ở đây) cập nhật trạng thái rồi gọi
+  `matter_thermostat_show_remote_state()`: ghi SystemMode/nhiệt độ đặt/On/Off/Fan Control trên CHIP thread
+  với cờ riêng để callback **không** báo ngược lại cho climate (không phát IR). Chế độ thermostat không có
+  (Auto, hoặc Sưởi/Khô/Quạt mà profile không có) giữ chế độ đang hiển thị, chỉ đồng bộ bật/tắt, quạt, đảo gió.
+  Ở chế độ Khô nhiệt độ đặt không đổi: nhiều máy (Sharp) gửi nhiệt độ cố định khi Khô.
 
 ---
 
@@ -588,24 +631,27 @@ Thu và lưu lệnh raw:
 
 ### 9.1 Đã build
 
-- Toàn bộ firmware v1.3.0 build sạch cho `esp32s3` với IDF v6.0.2 + esp_matter 1.6.1 + IRremoteESP8266
+- Toàn bộ firmware v1.4.0 build sạch cho `esp32s3` với IDF v6.0.2 + esp_matter 1.6.1 + IRremoteESP8266
   2.9.0 (cờ cảnh báo mặc định của IDF, cảnh báo bị coi là lỗi với mã của dự án), có Bluetooth (NimBLE +
-  CHIPoBLE): ảnh 2,07 MB (khe OTA 4 MB, còn trống khoảng 50 %), DIRAM tĩnh 45,7 %. Thư viện IR dùng tối đa
-  khoảng 2,5 KB stack khi tạo lệnh (đo bằng `-fstack-usage`); task điều khiển có 6 KB.
+  CHIPoBLE): ảnh 2,07 MB (khe OTA 4 MB, còn trống 51 %), DIRAM tĩnh 46,0 %. Thư viện IR dùng tối đa khoảng
+  2,5 KB stack khi tạo lệnh và khoảng 1 KB khi giải mã lệnh remote (đo bằng `-fstack-usage` với trình biên dịch
+  Xtensa); task điều khiển có 8 KB.
 - Mốc 1: server + commissioner Fabric B trên cùng CHIP stack build và link thành công.
 
 ### 9.2 Đã thử (không cần phần cứng)
 
 | Hạng mục | Cách thử | Kết quả |
 |---|---|---|
-| Logic thuần: nút BOOT, mã IR & ghép đoạn, khóa/chọn lệnh full-state, thuật toán bù, stale/backoff/CRC SHT, kiểm tra cấu hình, JSON/form/UTF-8 của web | `make -C test/host` (gcc, AddressSanitizer + UBSan) | 25 349 kiểm tra đạt; test đột biến (cấy lỗi) đều bị phát hiện |
+| Logic thuần: nút BOOT, mã IR & ghép đoạn, khóa/chọn lệnh full-state, thuật toán bù, stale/backoff/CRC SHT, kiểm tra cấu hình, JSON/form/UTF-8 của web | `make -C test/host` (gcc, AddressSanitizer + UBSan) | 25 382 kiểm tra đạt; test đột biến (cấy lỗi) đều bị phát hiện |
 | Giao diện web: mọi trang, ghép cảm biến giả, học IR giả, khóa profile, điều khiển, thuật toán, chẩn đoán, thoát; SSID chứa HTML hiển thị như văn bản | `test/web/ui_test.js` + `mock_server.py` trong Chromium headless, màn hình 390×844 | Đạt, không lỗi JavaScript |
 | BOOT: 1 lần không làm gì, 2 lần = chế độ ghép Matter, 3 lần = cấu hình; nhấn giữ hủy chuỗi; dội phím bị lọc | unit test `press_detector` | Đạt |
 | Off không bị thuật toán ghi đè; không tự bật | unit test `climate_algo` | Đạt |
 | Không phát tổ hợp raw chưa học, không đổi chế độ | unit test `ac_resolve` | Đạt |
 | Khung IR dài/nhiều đoạn không bị cắt âm thầm | unit test `ir_code`/`ir_capture` | Đạt |
-| Thư viện IR: 28 giao thức máy lạnh (Daikin, Panasonic, Mitsubishi, Gree, Coolix, Midea, LG, Samsung, Toshiba, Fujitsu, Hitachi, Sharp, Haier, Kelvinator, TCL, Electra, Carrier, Whirlpool…) tạo lệnh → mô phỏng mắt thu (đoạn cắt ở 12 ms, mark +60 µs, space −60 µs) → nhận diện lại đúng giao thức, chế độ, nhiệt độ (và quạt/đảo gió ở giao thức có); lệnh Tắt; danh sách model; remote TV (NEC) bị từ chối, nhiễu không nhận | `make -C test/host -j8` (`test_irlib.cpp`, thư viện build như trên thiết bị) | 1 538 kiểm tra đạt |
+| Thư viện IR: 28 giao thức máy lạnh (Daikin, Panasonic, Mitsubishi, Gree, Coolix, Midea, LG, Samsung, Toshiba, Fujitsu, Hitachi, Sharp, Haier, Kelvinator, TCL, Electra, Carrier, Whirlpool…) tạo lệnh → mô phỏng mắt thu (đoạn cắt ở 12 ms, mark +60 µs, space −60 µs) → nhận diện lại đúng giao thức, chế độ, nhiệt độ (và quạt/đảo gió ở giao thức có); lệnh Tắt; danh sách model; remote TV (NEC) bị từ chối, nhiễu không nhận | `make -C test/host -j8` (`test_irlib.cpp`, thư viện build như trên thiết bị) | 1 649 kiểm tra đạt (cả bộ `irlib_remote`) |
 | Giao diện nhận diện: nhận diện, đổi số mức quạt, phát thử, lưu profile thư viện, hiển thị cấu hình | `test/web/ui_test.js` | Đạt |
+| Đồng bộ remote gốc: chuỗi bấm remote Sharp (Lạnh 24 → 26 °C, quạt 2/3, 16 °C bị cắt về 18 °C, Sưởi, Khô, Tắt) qua mô phỏng mắt thu đọc lại đúng trạng thái; 5 mức quạt Daikin đọc lại đúng; ánh xạ sang thermostat (Tắt, Lạnh, Khô giữ nhiệt độ đặt, Quạt, Sưởi/Auto không có, cắt giới hạn, không đảo gió); sau khi bấm remote thuật toán đòi đúng trạng thái remote (không phát lại) cả ở chế độ cảm biến ngoài | `test_irlib.cpp` (`irlib_remote`), `test_climate.c` | Đạt |
+| Giao diện: dòng “Remote gốc” (trạng thái + lệnh bị bỏ qua), tùy chọn đồng bộ bật mặc định, tắt thì hiện “không theo dõi” | `test/web/ui_test.js` | Đạt |
 
 ### 9.3 Cần phần cứng để xác nhận
 
@@ -618,6 +664,7 @@ Thu và lưu lệnh raw:
 | 4b. Ghép qua Bluetooth (CHIPoBLE) khi ESP chưa có Wi-Fi và khi đã có Wi-Fi; Bluetooth còn hoạt động sau khi đã có Fabric A/B | Đã build và đối chiếu mã esp-matter/CHIP; cần điện thoại + bo |
 | 5. BOOT × 2 / × 3 trên GPIO0 thật, LED RGB, AP+STA, web trên điện thoại | Logic + UI đã thử; cần bo + điện thoại |
 | 6. Thu/phát IR với remote và máy lạnh thật | Đã cài đặt; cần mạch IR + máy lạnh |
+| 6b. Bấm remote gốc (Sharp…) → ứng dụng nhà đổi theo, ESP không phát lại | Logic + giải mã đã thử trên máy tính; cần remote + mạch IR + hub |
 | 7. Thuật toán trên phòng thật; mất cảm biến không phát lệnh sai | Logic đã thử; cần phần cứng |
 | AP+STA không làm mất đường mạng tới cảm biến | Thiết kế giữ STA; cần đo thực tế |
 | Cảm biến vẫn hoạt động ở hệ sinh thái cũ | Chỉ thêm fabric; cần xác nhận với hub |
@@ -630,16 +677,16 @@ bị tắt – khi đó không còn đường IPv6 tới mạng Thread.
 
 Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng thái.
 
-1. **Khởi động hai vai trò** – log có `App "ac_matter_ir" version: 1.3.0`, `room AC/thermostat endpoint 1 … fan control: N speed(s)`,
-   `device name: May lanh IR v1.3.0 (vendor DIY), firmware 1.3.0, BLE commissioning on`,
-   `BLE name: AC-XXXX-v1.3.0` và `commissioner ready: fabric index …, fabric 0x…, node 0x… (created)`; lần
+1. **Khởi động hai vai trò** – log có `App "ac_matter_ir" version: 1.4.0`, `room AC/thermostat endpoint 1 … fan control: N speed(s)`,
+   `device name: May lanh IR v1.4.0 (vendor DIY), firmware 1.4.0, BLE commissioning on`,
+   `BLE name: AC-XXXX-v1.4.0` và `commissioner ready: fabric index …, fabric 0x…, node 0x… (created)`; lần
    khởi động sau là `(restored)` với cùng fabric ID (không tạo fabric mới).
 1b. **Tìm thấy qua Bluetooth** – nhấn BOOT 2 lần; ứng dụng nRF Connect (hoặc ứng dụng nhà) thấy thiết bị
-   `AC-XXXX-v1.3.0` với dịch vụ `0xFFF6`. Thêm vào ứng dụng nhà bằng QR khi ESP **chưa** có Wi-Fi: ứng dụng
+   `AC-XXXX-v1.4.0` với dịch vụ `0xFFF6`. Thêm vào ứng dụng nhà bằng QR khi ESP **chưa** có Wi-Fi: ứng dụng
    gửi Wi-Fi, log `Disconnecting WiFi station interface`/`IP_EVENT_STA_GOT_IP` rồi `added to a home ecosystem`.
 2. **BOOT** – nhấn 1 lần: không có gì. Nhấn 2 lần: sau ~1,5 s log `BOOT x2: Matter pairing mode`,
    `pairing mode: commissioning window opened` và `CHIPoBLE advertising started`, LED nháy xanh dương; hết 15
-   phút hoặc ghép xong thì LED tắt. Nhấn 3 lần trong 1,5 s: log `portal open: SSID AC-Matter-XXXX-v1.3.0`,
+   phút hoặc ghép xong thì LED tắt. Nhấn 3 lần trong 1,5 s: log `portal open: SSID AC-Matter-XXXX-v1.4.0`,
    LED xanh lá. Nhấn 3 lần lần nữa:
    `portal already open: lifetime extended`. Giữ nút lâu: không có gì xảy ra (không factory reset).
 3. **Ghép cảm biến** – theo bước 5; trang Cảm biến hiển thị endpoint và giá trị đọc thử; sau khi Lưu, trạng
@@ -660,6 +707,11 @@ Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng
     “dùng nhiệt độ đã học gần nhất”; chế độ chưa học không chọn được.
 11. **Không Internet** – rút dây WAN của router: điều khiển từ điện thoại trong mạng nhà và cập nhật nhiệt độ
     cảm biến vẫn hoạt động (điều khiển từ xa ngoài nhà thì phụ thuộc hub của hệ sinh thái).
+12. **Remote gốc** – profile đã khóa; log khởi động có `listening for the original remote`. Bấm remote (ví dụ
+    Lạnh 24 °C quạt 2): log `remote: 1 segment(s), … level(s) received` rồi `climate: remote: Lạnh 24°C, …`;
+    ứng dụng nhà hiện Lạnh 24 °C, trang Máy lạnh dòng *Remote gốc* cập nhật, **không** có `IR sent`. Bấm Tắt
+    trên remote: ứng dụng hiện Tắt. Đổi nhiệt độ trong ứng dụng ngay sau đó: máy lạnh nhận đúng một lệnh.
+    Bấm remote TV: log `remote: ignored, giao thức NEC, profile dùng …`.
 
 ---
 
@@ -682,6 +734,11 @@ Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng
   chỉ phát sóng khi cửa sổ ghép mở.
 - Chỉ Wi-Fi 2,4 GHz; khi STA ở kênh khác, SoftAP theo kênh của STA (giới hạn phần cứng một radio).
 - Khi đang học IR, lệnh phát bị hoãn tới khi học xong (tránh tự thu tín hiệu của mình).
+- Đồng bộ từ remote gốc là một chiều “nghe được gì thì hiển thị nấy”: ESP chỉ biết lệnh khi mắt thu nhìn thấy
+  remote (cùng phòng, không bị che); lệnh bấm lúc ESP tắt nguồn hoặc đang phát/học bị bỏ lỡ. Chế độ Auto của
+  remote không có trong thermostat Matter: ứng dụng nhà giữ chế độ đang hiện (Lạnh nếu đang Tắt).
+- Nút đặc biệt của remote không mang trạng thái đầy đủ (hẹn giờ, một số nút Turbo/đèn ở vài giao thức) bị bỏ
+  qua; giao thức có nguồn dạng “đảo” (Kelon) không đọc được bật/tắt từ một lệnh.
 
 ---
 
@@ -702,7 +759,7 @@ Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng
 
 **Phiên bản firmware** chỉ đặt một chỗ: `set(PROJECT_VER "1.3.0")` trong `CMakeLists.txt` gốc. Từ đó sinh
 ra phiên bản ứng dụng ESP-IDF, `SoftwareVersionString` Matter, `SoftwareVersion` = MAJOR·10000 + MINOR·100 +
-PATCH (10300) và hậu tố `v1.3.0` của mọi tên (macro `APP_FW_VERSION`, `components/app_state/include/app_version.h`,
+PATCH (10300) và hậu tố `v1.4.0` của mọi tên (macro `APP_FW_VERSION`, `components/app_state/include/app_version.h`,
 `main/matter_project_config.h`).
 
 **Bluetooth** (`sdkconfig.defaults`): `CONFIG_BT_ENABLED`, `CONFIG_BT_NIMBLE_ENABLED`, `CONFIG_ENABLE_CHIPOBLE`

@@ -556,6 +556,12 @@
     fillSelect($('ctl-swing'), SWINGS.map((n, i) => [i, n]).filter(([i]) => swings & (1 << i)), dirty ? null : c.swing);
     text('ctl-last', c.has_sent ? c.last_sent.desc + ' · ' + fmtAge(c.last_sent_age_s) + (c.last_kind ? ' (' + RESOLVE_KINDS[c.last_kind] + ')' : '') : 'chưa');
     text('ctl-pending', c.pending_ms ? 'sau ' + Math.ceil(c.pending_ms / 1000) + ' giây: ' + c.desired.desc : 'không');
+    let rmt;
+    if (!c.remote_enabled) rmt = c.ready ? 'không theo dõi (tắt ở trang Thuật toán)' : 'chưa theo dõi (cần profile đã khóa)';
+    else if (!c.remote_listening) rmt = 'tạm dừng (đang học lệnh hoặc đang phát)';
+    else rmt = c.has_remote ? c.last_remote.desc + ' · ' + fmtAge(c.last_remote_age_s) : 'đang nghe, chưa nhận lệnh nào';
+    if (c.remote_enabled && c.remote_note) rmt += ' · bỏ qua lệnh cuối: ' + c.remote_note;
+    text('ctl-remote', rmt);
     msgbox('ctl-error', c.last_error);
   }
 
@@ -873,6 +879,7 @@
       f.stale_min.value = Math.round(c.stale_min_s / 60);
       f.allow_local_fallback.checked = c.allow_local_fallback;
       f.resend_on_boot.checked = c.resend_on_boot;
+      f.remote_sync.checked = c.remote_sync;
     }
     f.allow_local_fallback.disabled = !j.local_configured;
     const cl = j.climate;
@@ -898,6 +905,7 @@
       stale_min_s: Math.round(+f.stale_min.value * 60),
       allow_local_fallback: f.allow_local_fallback.checked ? 1 : 0,
       resend_on_boot: f.resend_on_boot.checked ? 1 : 0,
+      remote_sync: f.remote_sync.checked ? 1 : 0,
     };
     if (await act('config', body, 'Đã lưu thuật toán')) st.dirty['algo-form'] = false;
   });

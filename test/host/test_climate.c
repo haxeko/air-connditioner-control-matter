@@ -239,6 +239,116 @@ static void test_filter(void)
     CHECK(!a.has_filtered);
 }
 
+static const climate_offer_t k_offer = {
+    .heat = false, .dry = true, .fan_only = true, .swing = true,
+    .cool_min = 1800, .cool_max = 3000, .heat_min = 1600, .heat_max = 2800,
+};
+
+static climate_user_t user_cool26(void)
+{
+    climate_user_t u = { CLIMATE_MODE_COOL, 2600, 2200, AC_FAN_AUTO, AC_SWING_OFF };
+    return u;
+}
+
+/* State set with the original remote -> thermostat user state. */
+static void test_remote_mapping(void)
+{
+    climate_remote_result_t r;
+    climate_user_t u = user_cool26();
+    const ac_state_t off = { 0, 0, 0, 0, 0 };
+    climate_user_from_remote(&off, &k_offer, &u, &r);
+    CHECK_EQ(u.user_mode, CLIMATE_MODE_OFF);
+    CHECK_EQ(u.cool_target_centi, 2600); /* setpoints are kept while off */
+    CHECK(r.mode_shown && !r.cool_sp && !r.heat_sp && !r.fan);
+
+    const ac_state_t cool24 = { 1, AC_MODE_COOL, 48, AC_FAN_2, AC_SWING_ON };
+    climate_user_from_remote(&cool24, &k_offer, &u, &r);
+    CHECK_EQ(u.user_mode, CLIMATE_MODE_COOL);
+    CHECK_EQ(u.cool_target_centi, 2400);
+    CHECK_EQ(u.heat_target_centi, 2200);
+    CHECK_EQ(u.fan, AC_FAN_2);
+    CHECK_EQ(u.swing, AC_SWING_ON);
+    CHECK(r.mode_shown && r.cool_sp && !r.heat_sp && r.fan);
+
+    const ac_state_t cool31 = { 1, AC_MODE_COOL, 62, AC_FAN_AUTO, AC_SWING_OFF };
+    climate_user_from_remote(&cool31, &k_offer, &u, &r);
+    CHECK_EQ(u.cool_target_centi, 3000); /* clamped to the thermostat limits */
+
+    /* Dry: the fixed temperature of Dry (Sharp: its minimum) does not become the cooling setpoint */
+    const ac_state_t dry18 = { 1, AC_MODE_DRY, 36, AC_FAN_AUTO, AC_SWING_OFF };
+    climate_user_from_remote(&dry18, &k_offer, &u, &r);
+    CHECK_EQ(u.user_mode, CLIMATE_MODE_DRY);
+    CHECK_EQ(u.cool_target_centi, 3000);
+    CHECK(r.mode_shown && !r.cool_sp);
+
+    const ac_state_t fan = { 1, AC_MODE_FAN, AC_TEMP_NONE, AC_FAN_3, AC_SWING_OFF };
+    climate_user_from_remote(&fan, &k_offer, &u, &r);
+    CHECK_EQ(u.user_mode, CLIMATE_MODE_FAN_ONLY);
+    CHECK_EQ(u.cool_target_centi, 3000);
+    CHECK(!r.cool_sp && r.fan);
+    CHECK_EQ(u.fan, AC_FAN_3);
+
+    /* Heat is not offered by this thermostat, Auto never: the shown mode stays, the AC is on. */
+    u = user_cool26();
+    const ac_state_t heat22 = { 1, AC_MODE_HEAT, 44, AC_FAN_1, AC_SWING_OFF };
+    climate_user_from_remote(&heat22, &k_offer, &u, &r);
+    CHECK(!r.mode_shown && !r.heat_sp && !r.cool_sp && r.fan);
+    CHECK_EQ(u.user_mode, CLIMATE_MODE_COOL);
+    CHECK_EQ(u.heat_target_centi, 2200);
+    CHECK_EQ(u.fan, AC_FAN_1);
+    u.user_mode = CLIMATE_MODE_OFF;
+    const ac_state_t auto24 = { 1, AC_MODE_AUTO, 48, AC_FAN_AUTO, AC_SWING_OFF };
+    climate_user_from_remote(&auto24, &k_offer, &u, &r);
+    CHECK(!r.mode_shown);
+    CHECK_EQ(u.user_mode, CLIMATE_MODE_COOL);
+
+    /* Heat offered: heat setpoint */
+    climate_offer_t heat = k_offer;
+    heat.heat = true;
+    heat.swing = false;
+    u = user_cool26();
+    u.swing = AC_SWING_ON;
+    climate_user_from_remote(&heat22, &heat, &u, &r);
+    CHECK_EQ(u.user_mode, CLIMATE_MODE_HEAT);
+    CHECK_EQ(u.heat_target_centi, 2200);
+    CHECK(r.heat_sp && !r.cool_sp);
+    CHECK_EQ(u.swing, AC_SWING_ON); /* no swing offered: the remote's swing is not taken */
+}
+
+/* After a remote press the algorithm asks for exactly the remote's state: nothing is re-sent. */
+static void test_remote_no_resend(void)
+{
+    const ac_state_t cool24 = { 1, AC_MODE_COOL, 48, AC_FAN_2, AC_SWING_ON };
+    for (int external = 0; external <= 1; external++) {
+        climate_params_t p = params(external != 0);
+        climate_algo_t a;
+        climate_output_t o;
+        climate_algo_init(&a);
+        feed3(&a, &p, 2900, 0); /* warm room: external mode would compensate */
+        climate_inputs_t in = inputs(CLIMATE_MODE_COOL, 2600, true, 0);
+        for (int64_t t = 0; t <= 60 * MIN_MS; t += MIN_MS) {
+            in.now_ms = t;
+            climate_algo_step(&a, &p, &in, &o); /* builds up an offset in external mode */
+        }
+        climate_user_t u = { in.user_mode, in.cool_target_centi, in.heat_target_centi, in.fan, in.swing };
+        climate_remote_result_t r;
+        climate_user_from_remote(&cool24, &k_offer, &u, &r);
+        climate_algo_note_remote(&a, 61 * MIN_MS);
+        in.user_mode = u.user_mode;
+        in.cool_target_centi = u.cool_target_centi;
+        in.fan = u.fan;
+        in.swing = u.swing;
+        in.now_ms = 61 * MIN_MS;
+        climate_algo_step(&a, &p, &in, &o);
+        CHECK(ac_state_equal(&o.desired, &cool24));
+        CHECK_EQ(o.offset_centi, 0);
+        /* compensation resumes only after one interval */
+        in.now_ms = 61 * MIN_MS + p.comp_interval_ms - 1;
+        climate_algo_step(&a, &p, &in, &o);
+        CHECK(ac_state_equal(&o.desired, &cool24));
+    }
+}
+
 void test_climate_algo(void)
 {
     test_quantize();
@@ -246,4 +356,6 @@ void test_climate_algo(void)
     test_compensation();
     test_limits();
     test_filter();
+    test_remote_mapping();
+    test_remote_no_resend();
 }

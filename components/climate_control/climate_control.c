@@ -26,6 +26,7 @@ typedef enum {
     EV_CONFIG,
     EV_PROFILE,
     EV_FORCE,
+    EV_REMOTE,
 } ev_type_t;
 
 typedef struct {
@@ -43,6 +44,10 @@ typedef struct {
         struct {
             uint8_t fan, swing;
         } fs;
+        struct {
+            uint8_t *blob; /* owned by the event */
+            size_t len;
+        } remote;
         app_config_t cfg;
     };
 } event_t;
@@ -67,6 +72,10 @@ static bool s_has_desired_sent;
 static int64_t s_send_at_ms;      /* 0 = nothing scheduled */
 static bool s_force_next;
 static int64_t s_persist_at_ms;
+static climate_remote_cb_t s_remote_cb;
+static bool s_monitor_on;
+
+static void post(const event_t *ev);
 
 static int64_t now_ms(void)
 {
@@ -125,6 +134,33 @@ static void load_runtime(void)
     }
 }
 
+/* IR task: a command of the original remote was received. */
+static void on_ir_command(uint8_t *blob, size_t len)
+{
+    event_t ev = { .type = EV_REMOTE };
+    ev.remote.blob = blob;
+    ev.remote.len = len;
+    post(&ev);
+}
+
+/* The original remote is followed while automatic control is possible (locked profile). */
+static void sync_monitor(bool ready)
+{
+    bool want = ready && !s_cfg.remote_sync_off;
+    if (want == s_monitor_on) {
+        return;
+    }
+    s_monitor_on = want;
+    if (want) {
+        esp_err_t err = ir_monitor_start(on_ir_command);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "original remote not followed: %s", esp_err_to_name(err));
+        }
+    } else {
+        ir_monitor_stop();
+    }
+}
+
 /* Evaluate the algorithm, update the status, return the desired state. */
 static void evaluate(climate_output_t *out)
 {
@@ -152,6 +188,7 @@ static void evaluate(climate_output_t *out)
     s_status.has_filtered = s_algo.has_filtered;
     s_status.filtered_centi = (int16_t)s_algo.filtered_centi;
     xSemaphoreGive(s_lock);
+    sync_monitor(ready);
 }
 
 static void transmit(const climate_output_t *out, bool force)
@@ -225,6 +262,92 @@ static void schedule(bool user_origin)
     }
 }
 
+/*
+ * The original remote changed the AC. Its state becomes the user state (as if chosen in a home app)
+ * and the reference for the next command, so nothing is transmitted for it and protocols that toggle
+ * settings start from the right state. A mode the thermostat does not offer (e.g. Auto) keeps the
+ * shown mode; only power, fan and swing follow.
+ */
+static void handle_remote(const uint8_t *blob, size_t len)
+{
+    if (!s_status.ready || s_cfg.remote_sync_off) {
+        return; /* received just before the monitor was stopped */
+    }
+    ac_state_t rs;
+    char why[64];
+    esp_err_t err = ac_profiles_decode_remote(blob, len, &rs, why, sizeof(why));
+    if (err != ESP_OK) {
+        if (err == ESP_ERR_NOT_FOUND) {
+            ESP_LOGI(TAG, "remote: ignored, %s", why);
+        } else {
+            ESP_LOGW(TAG, "remote: command not decoded (%s)", esp_err_to_name(err));
+        }
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        s_status.remote_ignored++;
+        strlcpy(s_status.remote_note, why[0] ? why : esp_err_to_name(err), sizeof(s_status.remote_note));
+        xSemaphoreGive(s_lock);
+        return;
+    }
+    ac_thermostat_limits_t lim;
+    ac_profiles_thermostat_limits(ac_profiles_active_slot(), &lim);
+    const climate_offer_t offer = {
+        .heat = lim.heat,
+        .dry = lim.dry,
+        .fan_only = lim.fan_only,
+        .swing = lim.swing,
+        .cool_min = lim.cool_min,
+        .cool_max = lim.cool_max,
+        .heat_min = lim.heat_min,
+        .heat_max = lim.heat_max,
+    };
+    climate_remote_result_t res;
+    climate_remote_update_t u = { .mask = CLIMATE_USER_MODE };
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    climate_user_t user = {
+        .user_mode = s_status.user_mode,
+        .cool_target_centi = s_status.cool_target_centi,
+        .heat_target_centi = s_status.heat_target_centi,
+        .fan = s_status.fan,
+        .swing = s_status.swing,
+    };
+    climate_user_from_remote(&rs, &offer, &user, &res);
+    s_status.user_mode = user.user_mode;
+    s_status.cool_target_centi = user.cool_target_centi;
+    s_status.heat_target_centi = user.heat_target_centi;
+    s_status.fan = user.fan;
+    s_status.swing = user.swing;
+    s_status.has_remote = true;
+    s_status.last_remote = rs;
+    s_status.last_remote_us = app_time_us();
+    s_status.remote_count++;
+    s_status.remote_note[0] = 0;
+    xSemaphoreGive(s_lock);
+    u.user_mode = user.user_mode;
+    u.cool_target_centi = user.cool_target_centi;
+    u.heat_target_centi = user.heat_target_centi;
+    u.mask |= (res.cool_sp ? CLIMATE_USER_COOL_SP : 0u) | (res.heat_sp ? CLIMATE_USER_HEAT_SP : 0u);
+    u.has_fan = res.fan;
+    u.fan = user.fan;
+    u.swing = user.swing;
+
+    climate_algo_note_remote(&s_algo, now_ms());
+    climate_output_t out;
+    evaluate(&out);
+    s_last_desired_sent = out.desired;
+    s_has_desired_sent = true;
+    s_send_at_ms = 0;     /* the remote wins over a change still waiting for its debounce */
+    s_force_next = false;
+    s_persist_at_ms = now_ms() + PERSIST_DELAY_MS;
+
+    char desc[64];
+    ac_state_describe(&rs, desc, sizeof(desc));
+    ESP_LOGI(TAG, "remote: %s%s", desc, res.mode_shown ? "" : " (mode not offered in the home apps: only power/fan follow)");
+    if (s_remote_cb) {
+        s_remote_cb(&u);
+    }
+}
+
 static void handle_event(const event_t *ev)
 {
     switch (ev->type) {
@@ -291,6 +414,10 @@ static void handle_event(const event_t *ev)
         s_force_next = true;
         s_send_at_ms = now_ms();
         break;
+    case EV_REMOTE:
+        handle_remote(ev->remote.blob, ev->remote.len);
+        free(ev->remote.blob);
+        break;
     }
 }
 
@@ -356,8 +483,9 @@ esp_err_t climate_control_start(const app_config_t *cfg)
     load_runtime();
     refresh_params();
     s_status.running = true;
-    /* 6 KB: library profiles generate their commands here (IRremoteESP8266 IRac, ~2.5 KB deep) */
-    if (xTaskCreate(task, "climate", 6144, NULL, 6, NULL) != pdPASS) {
+    /* 8 KB: library profiles generate (IRac, ~2.5 KB deep) and decode (IRrecv + IRAcUtils, all
+     * protocols) their commands here */
+    if (xTaskCreate(task, "climate", 8192, NULL, 6, NULL) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
@@ -365,12 +493,19 @@ esp_err_t climate_control_start(const app_config_t *cfg)
 
 static void post(const event_t *ev)
 {
-    if (s_queue == NULL) {
-        return;
+    if (s_queue == NULL || xQueueSend(s_queue, ev, 0) != pdTRUE) {
+        if (s_queue != NULL) {
+            app_log_error("climate", "event queue full, event %d dropped", ev->type);
+        }
+        if (ev->type == EV_REMOTE) {
+            free(ev->remote.blob);
+        }
     }
-    if (xQueueSend(s_queue, ev, 0) != pdTRUE) {
-        app_log_error("climate", "event queue full, event %d dropped", ev->type);
-    }
+}
+
+void climate_control_set_remote_callback(climate_remote_cb_t cb)
+{
+    s_remote_cb = cb;
 }
 
 void climate_control_on_user_change(uint8_t mode, int16_t cool_centi, int16_t heat_centi, uint32_t mask)
@@ -435,4 +570,8 @@ void climate_control_get_status(climate_status_t *out)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     *out = s_status;
     xSemaphoreGive(s_lock);
+    ir_monitor_status_t m;
+    ir_monitor_get_status(&m);
+    out->remote_enabled = m.enabled;
+    out->remote_listening = m.listening;
 }

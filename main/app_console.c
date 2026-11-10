@@ -104,6 +104,18 @@ static int cmd_status(int argc, char **argv)
     printf("Climate : %s, mode %u, reason: %s\n", cs.ready ? "ready" : cs.not_ready, cs.user_mode,
            climate_reason_text(cs.reason));
 
+    printf("Remote  : %s, %lu applied, %lu ignored", cs.remote_listening ? "listening" : (cs.remote_enabled ? "paused" : "not followed"),
+           (unsigned long)cs.remote_count, (unsigned long)cs.remote_ignored);
+    if (cs.has_remote) {
+        char desc[64];
+        ac_state_describe(&cs.last_remote, desc, sizeof(desc));
+        printf(", last '%s'", desc);
+    }
+    if (cs.remote_note[0]) {
+        printf(", last ignored: %s", cs.remote_note);
+    }
+    printf("\n");
+
     ir_tx_status_t ir;
     ir_tx_get_status(&ir);
     printf("IR      : %lu sent, %lu failed, last '%s'\n", (unsigned long)ir.sent, (unsigned long)ir.failed,

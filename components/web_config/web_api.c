@@ -254,6 +254,16 @@ static void put_climate(wj_t *w)
     }
     wj_uint(w, "pending_ms", cs.pending_ms);
     wj_str(w, "last_error", cs.last_error);
+    wj_bool(w, "remote_enabled", cs.remote_enabled);
+    wj_bool(w, "remote_listening", cs.remote_listening);
+    wj_uint(w, "remote_count", cs.remote_count);
+    wj_uint(w, "remote_ignored", cs.remote_ignored);
+    wj_bool(w, "has_remote", cs.has_remote);
+    if (cs.has_remote) {
+        put_state(w, "last_remote", &cs.last_remote);
+        put_age(w, "last_remote_age_s", cs.last_remote_us);
+    }
+    wj_str(w, "remote_note", cs.remote_note);
     wj_obj_end(w);
 }
 
@@ -1509,6 +1519,7 @@ static void put_config(wj_t *w, const app_config_t *cfg)
     wj_uint(w, "filter_tau_s", cfg->filter_tau_s);
     wj_uint(w, "user_debounce_ms", cfg->user_debounce_ms);
     wj_bool(w, "resend_on_boot", cfg->resend_on_boot);
+    wj_bool(w, "remote_sync", !cfg->remote_sync_off);
     wj_uint(w, "stale_min_s", cfg->stale_min_s);
     wj_obj_end(w);
 }
@@ -1552,6 +1563,7 @@ static void post_config(api_ctx_t *c)
     }
     cfg.allow_local_fallback = form_get_bool(c->body, "allow_local_fallback", cfg.allow_local_fallback) ? 1 : 0;
     cfg.resend_on_boot = form_get_bool(c->body, "resend_on_boot", cfg.resend_on_boot) ? 1 : 0;
+    cfg.remote_sync_off = form_get_bool(c->body, "remote_sync", !cfg.remote_sync_off) ? 0 : 1;
     const char *why = NULL;
     if (!app_config_validate(&cfg, &why)) {
         api_fail(c, 400, "%s", why ? why : "Giá trị không hợp lệ");

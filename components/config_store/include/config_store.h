@@ -74,7 +74,7 @@ typedef struct {
     uint16_t filter_tau_s;         /* time constant of the room temperature low-pass filter   */
     uint16_t user_debounce_ms;     /* coalesce bursts of setpoint writes from the hub         */
     uint8_t resend_on_boot;        /* re-send the last full state after power-up              */
-    uint8_t reserved0;
+    uint8_t remote_sync_off;       /* 1 = ignore the original remote (was reserved, 0 = follow) */
     uint32_t stale_min_s;          /* lower bound of the stale timeout                       */
     uint32_t reserved[4];
 } app_config_t;

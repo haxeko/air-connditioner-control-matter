@@ -94,7 +94,43 @@ void climate_algo_feed(climate_algo_t *a, const climate_params_t *p, int16_t val
 void climate_algo_reset_filter(climate_algo_t *a);
 /** The user changed the target: give the room one interval before the next correction. */
 void climate_algo_note_user_change(climate_algo_t *a, int64_t now_ms);
+/** The original remote set the AC directly: no correction is applied to it, the next one starts from
+ *  zero after one interval. */
+void climate_algo_note_remote(climate_algo_t *a, int64_t now_ms);
 void climate_algo_step(climate_algo_t *a, const climate_params_t *p, const climate_inputs_t *in, climate_output_t *out);
+
+/* ---- State set with the original remote -> user state of the thermostat ---- */
+
+/* What the thermostat offers (Off and Cool always). */
+typedef struct {
+    bool heat, dry, fan_only, swing;
+    int16_t cool_min, cool_max;
+    int16_t heat_min, heat_max;
+} climate_offer_t;
+
+typedef struct {
+    uint8_t user_mode;          /* CLIMATE_MODE_* */
+    int16_t cool_target_centi;
+    int16_t heat_target_centi;
+    uint8_t fan;                /* ac_fan_t   */
+    uint8_t swing;              /* ac_swing_t */
+} climate_user_t;
+
+typedef struct {
+    bool mode_shown;            /* the AC mode has a thermostat mode (not Auto / not offered) */
+    bool cool_sp, heat_sp;      /* setpoint taken from the remote                             */
+    bool fan;                   /* fan (and swing when offered) taken from the remote         */
+} climate_remote_result_t;
+
+/**
+ * Apply a state set with the original remote to `user`. Off -> Off. A mode without thermostat mode
+ * keeps the shown mode (Cool if it was Off: the AC is on); only power, fan and swing follow then. In
+ * Cool/Heat the setpoint is the remote's temperature clamped to the thermostat limits. Dry keeps the
+ * cooling setpoint: many ACs (e.g. Sharp) send a fixed temperature in Dry, which must not become the
+ * setpoint of the next Cool.
+ */
+void climate_user_from_remote(const ac_state_t *remote, const climate_offer_t *offer, climate_user_t *user,
+                              climate_remote_result_t *res);
 
 /** Round a temperature to the AC step (ties: up for cooling, down for heating). */
 int16_t climate_quantize(int16_t centi, uint8_t step_half, bool heating);

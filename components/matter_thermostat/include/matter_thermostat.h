@@ -116,6 +116,15 @@ esp_err_t matter_thermostat_set_local_temperature(bool valid, int16_t centi_c);
 /** Change mode/setpoints locally (web UI); goes through the same validation as hub writes. */
 esp_err_t matter_thermostat_set_user_state(const thermostat_user_state_t *state, uint32_t mask);
 
+/**
+ * The original IR remote changed the AC (the climate controller already follows it): show the new
+ * mode/setpoints (mask TSTAT_CHANGED_*) and, when has_fan, fan/swing in the home apps WITHOUT calling
+ * the user/fan callbacks, so nothing is transmitted back. Modes the thermostat does not offer are
+ * skipped, setpoints are clamped to its limits. Any task, non blocking.
+ */
+esp_err_t matter_thermostat_show_remote_state(const thermostat_user_state_t *state, uint32_t mask, bool has_fan,
+                                              uint8_t fan, uint8_t swing);
+
 esp_err_t matter_thermostat_open_commissioning_window(uint16_t seconds);
 esp_err_t matter_thermostat_close_commissioning_window(void);
 
