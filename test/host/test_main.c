@@ -15,6 +15,7 @@ int main(void)
         { "press_detector", test_press_detector }, { "ir_code", test_ir_code },     { "ir_capture", test_ir_capture },
         { "ac_types", test_ac_types },             { "climate_algo", test_climate_algo }, { "rt_logic", test_rt_logic },
         { "app_config", test_app_config },         { "web_util", test_web_util },
+        { "matter_map", test_matter_map },
     };
     for (size_t i = 0; i < sizeof(suites) / sizeof(suites[0]); i++) {
         int before = g_failures;

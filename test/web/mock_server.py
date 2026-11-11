@@ -31,6 +31,8 @@ STATE = {
     "fabrics": [{"index": 1, "vendor_id": 0x1349, "label": ""}, {"index": 3, "vendor_id": 0x6006, "label": "Nhà cũ"}],
     "ota": {"version": "1.0.0", "uploads": 0},
     "factory_reset": False,
+    "shown_by": 0,
+    "shown_t": time.time(),
     "crash": True,
     "window_open": False,
     "binding": None,
@@ -122,6 +124,17 @@ def climate():
             "remote_listening": locked and STATE["config"]["remote_sync"], "remote_count": 2, "remote_ignored": 1,
             "has_remote": True, "last_remote": state_obj("m0t52f1s0"), "last_remote_age_s": 40,
             "remote_note": "giao thức NEC, profile dùng SHARP_AC"}
+
+
+def shown():
+    """What the device reports over Matter (matter_thermostat_get_shown_state())."""
+    th = STATE["thermostat"]
+    on = th["mode"] != 0
+    return {"valid": True, "on": on, "mode": th["mode"], "cool_sp": th["cool_sp"], "heat_sp": th["heat_sp"],
+            "running": 6 if th["mode"] in (3, 8) else 0, "has_fan": True,
+            "fan_mode": (5 if STATE["fan"] == 0 else 1) if on else 0,
+            "speed": (2 if STATE["fan"] == 0 else 1) if on else 0, "speed_max": 3, "rock": on and STATE["swing"] == 1,
+            "by": STATE["shown_by"], "age_s": int(time.time() - STATE["shown_t"])}
 
 
 def ir():
@@ -258,7 +271,7 @@ def route(method, path, q, f):
                     "restart_needed": False, "default_carrier_hz": 38000,
                     "thermostat": dict(s["thermostat"], heat=False, dry=False, fan_only=False, cool_min=2400,
                                        cool_max=2600, heat_min=1600, heat_max=3000),
-                    "climate": climate(), "ir": ir(), "learn": learn_status()}
+                    "climate": climate(), "ir": ir(), "learn": learn_status(), "shown": shown()}
         if path == "ac/codes":
             slot = int(q.get("slot", ["0"])[0])
             return {"slot": slot, "codes": s["codes"].get(slot, [])}
@@ -430,6 +443,8 @@ def route(method, path, q, f):
         if g("fan") is not None:
             s["fan"] = int(g("fan"))
             s["swing"] = int(g("swing"))
+        s["shown_by"] = 3
+        s["shown_t"] = time.time()
         return {}
     if path == "config":
         c = s["config"]

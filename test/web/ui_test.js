@@ -131,6 +131,12 @@ function fwImage(project, version) {
     check(true, 'manual control sent through the thermostat');
     await page.waitForFunction(() => document.getElementById('ctl-remote').textContent.startsWith('Lạnh 26'));
     check((await txt('#ctl-remote')).includes('bỏ qua lệnh cuối: giao thức NEC'), 'original remote state and last ignored command shown');
+    await page.waitForFunction(() => document.getElementById('ctl-shown').textContent.includes('đổi bởi trang này'));
+    {
+      const shownTxt = await txt('#ctl-shown');
+      check(shownTxt.startsWith('Bật · Làm lạnh') && shownTxt.includes('đang làm lạnh') && shownTxt.includes('quạt'),
+            'state reported to the home apps shown (power, mode, running state, fan)');
+    }
 
     // ---------------------------------------------------------------- Remote recognition (IR library)
     await page.click('#det-start');

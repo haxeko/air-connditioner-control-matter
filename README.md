@@ -4,7 +4,7 @@ Firmware ESP-IDF thuần (không Arduino, không ESPHome, không Home Assistant/
 ESP32-S3 N16R8:
 
 - xuất hiện trong Google Home, Apple Home, SmartThings, Alexa, Aqara Home, Home Assistant… dưới dạng
-  **máy lạnh / Matter Thermostat** tên **`May lanh IR v1.6.0`** (Tắt/Làm lạnh, Sưởi/Khô/Quạt khi profile máy
+  **máy lạnh / Matter Thermostat** tên **`May lanh IR v1.7.0`** (Tắt/Làm lạnh, Sưởi/Khô/Quạt khi profile máy
   lạnh có các chế độ đó; tốc độ quạt và đảo gió qua cluster Fan Control);
 - tự tạo **fabric riêng (Fabric B)** để ghép cảm biến nhiệt độ Matter đã có trong nhà bằng Multi-Admin,
   rồi **subscribe** trực tiếp nhiệt độ của cảm biến (kể cả cảm biến Thread qua Border Router sẵn có);
@@ -24,8 +24,34 @@ ESP32-S3 N16R8:
 - **tự phục hồi và tự báo lỗi**: treo thì watchdog khởi động lại; lỗi nghiêm trọng để lại báo cáo (tác vụ, vị trí)
   đọc được trên trang Chẩn đoán;
 - lưu mọi cấu hình vào flash: mất điện không phải thiết lập lại;
-- mọi tên thiết bị phát ra đều có **hậu tố phiên bản firmware** (`v1.6.0`): tên Matter, tên Bluetooth
-  `AC-XXXX-v1.6.0`, Wi-Fi cấu hình `AC-Matter-XXXX-v1.6.0` – nhìn tên là biết thiết bị đang chạy bản nào.
+- mọi tên thiết bị phát ra đều có **hậu tố phiên bản firmware** (`v1.7.0`): tên Matter, tên Bluetooth
+  `AC-XXXX-v1.7.0`, Wi-Fi cấu hình `AC-Matter-XXXX-v1.7.0` – nhìn tên là biết thiết bị đang chạy bản nào.
+
+### Có gì mới trong v1.7.0
+
+Sửa đồng bộ với **Apple Home** (báo lỗi: bấm remote gốc thì mắt nhận nhưng Apple Home không đổi; bật trên Apple
+Home thì một lúc sau tự tắt). Apple Home hiển thị thiết bị loại *Room Air Conditioner* như một máy sưởi/làm mát
+(HomeKit Heater/Cooler, theo trả lời của kỹ sư Apple trên diễn đàn nhà phát triển); trạng thái “đang chạy” và quạt
+của loại này lấy từ các thuộc tính mà bản trước không báo đúng:
+
+- **Trạng thái đang chạy** (`ThermostatRunningState`, mới): Làm lạnh/Khô → “đang làm lạnh”, Sưởi → “đang sưởi”,
+  Quạt → “quạt chạy”, Tắt → không. Trước đây thuộc tính này không có, nên Apple Home có thể hiện ô máy lạnh là
+  Tắt/Chờ dù máy đang chạy – cả khi bật từ Apple Home lẫn khi bật bằng remote gốc.
+- **Quạt Tự động không còn báo tốc độ hiện tại 0 %**: khi máy chạy với quạt tự động, tốc độ hiện tại báo là mức
+  giữa (ví dụ 2/3). Ứng dụng nhà coi quạt 0 % là quạt tắt, tức máy tắt.
+- **Quạt không còn bật/tắt máy lạnh**: trước đây ghi “quạt Off”/0 % (thanh trượt về cuối, hoặc ứng dụng tự ghi lại
+  một tốc độ nó không biết) **tắt máy lạnh**, và chọn tốc độ khi máy tắt thì **bật máy**. Nay bật/tắt chỉ đi qua
+  On/Off và chế độ (`SystemMode`); quạt Off/0 % nghĩa là quạt tự động; chọn tốc độ lúc máy tắt được dùng ở lần bật
+  sau. Đây là nguyên nhân khả dĩ của “bật lên một lúc thì tự tắt” khi ứng dụng gửi kèm lệnh quạt.
+- Trang **Máy lạnh** có dòng mới **Ứng dụng nhà đang thấy**: đúng những gì thiết bị đang báo qua Matter (bật/tắt,
+  chế độ, nhiệt độ đặt, đang làm lạnh, quạt) và ai đổi lần cuối (ứng dụng nhà, remote gốc, trang này). Bấm remote
+  rồi xem dòng này: nếu nó đổi mà Apple Home không đổi thì phần còn lại nằm ở Apple Home/bộ trung tâm.
+
+Về chế độ: Apple Home chỉ có **Tắt / Sưởi / Làm lạnh / Tự động** cho máy lạnh, và chỉ hiện chế độ mà thiết bị khai báo
+được (máy chỉ làm lạnh → chỉ Tắt và Làm lạnh). **Khô và Quạt không có trong Apple Home** (HomeKit không có hai chế độ
+này); **Tự động** của Matter đòi máy có cả Sưởi, và với loại Room Air Conditioner thì Apple Home đang gửi Làm lạnh
+khi chọn Tự động (lỗi Apple đã xác nhận). Khô/Quạt/Tự động vẫn dùng được bằng remote gốc, trang web, và ứng dụng hỗ
+trợ (Home Assistant, SmartThings…). Xem [mục 10](#10-giới-hạn-đã-biết).
 
 ### Có gì mới trong v1.6.0
 
@@ -40,7 +66,7 @@ Bản rà soát và tối ưu (firmware và [mạch in v1.4](hardware/ac-ir-s3/R
   vùng `coredump` trước khi khởi động lại. Tab **Chẩn đoán → Sự cố khởi động lại** (và lệnh console `diag`) hiện
   tác vụ gây lỗi, vị trí và chuỗi địa chỉ gọi hàm – chỉ là địa chỉ trong chương trình, không có nội dung bộ nhớ.
   `python tools/decode_backtrace.py <địa chỉ…>` đổi các địa chỉ đó thành tên hàm bằng file
-  `ac_matter_ir_v1.6.0_symbols.txt.gz` (không cần ESP-IDF). Phân vùng này chỉ có trên bo nạp file `full` từ
+  `ac_matter_ir_vX.Y.Z_symbols.txt.gz` của đúng phiên bản (không cần ESP-IDF). Phân vùng này chỉ có trên bo nạp file `full` từ
   v1.6.0, hoặc nạp thêm file bảng phân vùng (xem [firmware/README.md](firmware/README.md)); bo chỉ cập nhật file
   app thì chạy bình thường, chỉ là không lưu báo cáo.
 - **Ngăn xếp của từng tác vụ** (số byte còn trống ít nhất từ lúc khởi động) trên trang Chẩn đoán và lệnh `diag`:
@@ -387,7 +413,7 @@ idf.py build
 Lần build đầu, component manager tải `esp_matter 1.6.1` và các phụ thuộc đúng như `dependencies.lock`
 (cần Internet; các lần sau không cần). Build toàn bộ connectedhomeip mất khá lâu (10–30 phút).
 
-Đóng gói file `.bin` dựng sẵn (tên có hậu tố phiên bản: `ac_matter_ir_v1.6.0_app_0x40000.bin` để nâng cấp/tải
+Đóng gói file `.bin` dựng sẵn (tên có hậu tố phiên bản: `ac_matter_ir_v1.7.0_app_0x40000.bin` để nâng cấp/tải
 lên web, `…_full_0x0.bin` cho bo trắng, `…_bootloader_0x0.bin`) vào `firmware/`: `python tools/package_firmware.py`.
 
 Nâng cấp thư mục đã build bản cũ (v1.0.0 không có Bluetooth; trước v1.6.0 bootloader chưa bật rollback): xóa
@@ -438,7 +464,7 @@ Playwright): `node test/web/ui_test.js http://127.0.0.1:8080/`.
 
 ### Bước 1 – Wi-Fi cấu hình và mật khẩu
 
-Mỗi thiết bị phát Wi-Fi cấu hình có SSID riêng `AC-Matter-XXXX-v1.6.0` (4 ký tự cuối MAC + phiên bản
+Mỗi thiết bị phát Wi-Fi cấu hình có SSID riêng `AC-Matter-XXXX-v1.7.0` (4 ký tự cuối MAC + phiên bản
 firmware). Mật khẩu mặc định
 (cố định, đặt bằng `CONFIG_APP_AP_PASSWORD` trong `sdkconfig.defaults`) là:
 
@@ -463,7 +489,7 @@ dùng và mã ghép Matter (kèm QR vẽ bằng ký tự). Các lệnh khác: `s
 
 1. Lần đầu (chưa có Wi-Fi) thiết bị tự phát Wi-Fi cấu hình. Các lần sau: **nhấn BOOT 3 lần nhanh** (trong
    1,5 s). 1–2 lần nhấn không làm gì; nhấn khi đang mở chỉ gia hạn thời gian.
-2. Điện thoại kết nối `AC-Matter-XXXX-v1.6.0`. Nếu điện thoại báo “không có Internet”, chọn **giữ kết nối**.
+2. Điện thoại kết nối `AC-Matter-XXXX-v1.7.0`. Nếu điện thoại báo “không có Internet”, chọn **giữ kết nối**.
 3. Mở `http://192.168.4.1` → tab **Wi-Fi** → *Quét mạng* → chọn mạng 2,4 GHz → nhập mật khẩu → **Lưu**.
 4. Chờ “Đã kết nối mạng mới”. Nếu sai mật khẩu, sau 40 s thiết bị tự quay lại mạng cũ (nếu có).
 
@@ -476,15 +502,15 @@ biến không bị gián đoạn.
    để in tem dán lên thiết bị), hoặc lệnh `secrets` trên cổng serial. Mã là cố định cho từng thiết bị (tạo
    ngẫu nhiên ở lần khởi động đầu, lưu NVS).
 2. Bật **chế độ ghép**: **nhấn nút BOOT 2 lần** (trong 1,5 s) → LED **nháy xanh dương** trong suốt thời gian
-   cho phép ghép (15 phút). Trong thời gian này ESP **phát Bluetooth** (tên `AC-XXXX-v1.6.0`) và, nếu đã vào
-   Wi-Fi nhà, quảng bá DNS-SD `_matterc._udp` (tên `May lanh IR v1.6.0`). ESP chưa có Wi-Fi vẫn ghép được qua
+   cho phép ghép (15 phút). Trong thời gian này ESP **phát Bluetooth** (tên `AC-XXXX-v1.7.0`) và, nếu đã vào
+   Wi-Fi nhà, quảng bá DNS-SD `_matterc._udp` (tên `May lanh IR v1.7.0`). ESP chưa có Wi-Fi vẫn ghép được qua
    Bluetooth. Khi thiết bị chưa thuộc hệ sinh thái nào, chế độ ghép tự bật 15 phút sau mỗi lần khởi động. Cũng
    có thể bật bằng nút *Mở cửa sổ ghép* trên web hoặc lệnh `pairing`.
 3. Trên điện thoại: **bật Bluetooth**, kết nối **Wi-Fi nhà 2,4 GHz** (ESP32 không dùng được 5 GHz; **không**
    kết nối Wi-Fi cấu hình `AC-Matter-…` khi ghép), đứng gần thiết bị. Trong Google Home / Apple Home /
    SmartThings / Alexa / Home Assistant: *Thêm thiết bị → Matter*, quét QR hoặc nhập mã số. Ứng dụng gửi
    Wi-Fi nhà qua Bluetooth, ESP vào mạng và ứng dụng hoàn tất qua Wi-Fi. Ghép xong, LED sáng xanh lá 2 s rồi
-   tắt; thiết bị hiện tên `May lanh IR v1.6.0` (đổi tên trong ứng dụng thì tên mới được giữ).
+   tắt; thiết bị hiện tên `May lanh IR v1.7.0` (đổi tên trong ứng dụng thì tên mới được giữ).
 4. Firmware dùng **chứng thư thiết bị thử nghiệm của SDK** (VID 0xFFF1): ứng dụng sẽ cảnh báo “thiết bị
    chưa được chứng nhận” – chọn vẫn thêm. Một số ứng dụng cần bật chế độ nhà phát triển/thiết bị thử nghiệm.
 5. Muốn thêm vào hệ sinh thái thứ hai: dùng chức năng chia sẻ (Multi-Admin) của hệ sinh thái thứ nhất, hoặc
@@ -572,7 +598,7 @@ học IR, thử Wi-Fi mới hoặc đang cập nhật firmware).
    profile IR và cài đặt đều được giữ.
 4. Firmware mới chạy thử 60 giây. Nếu thiết bị khởi động lại trong thời gian đó (firmware lỗi), nó tự quay về
    bản cũ. Tính năng quay về cần bootloader từ v1.5.0: bo nạp lần đầu bằng bản cũ hơn vẫn cập nhật qua web được
-   nhưng không tự quay về, cho tới khi nạp file `ac_matter_ir_v1.6.0_bootloader_0x0.bin` qua UART một lần (không
+   nhưng không tự quay về, cho tới khi nạp file `ac_matter_ir_v1.7.0_bootloader_0x0.bin` qua UART một lần (không
    mất dữ liệu, lệnh trong [`firmware/README.md`](firmware/README.md)).
 
 ### Rời khỏi ứng dụng nhà, đặt lại gốc
@@ -602,12 +628,15 @@ học IR, thử Wi-Fi mới hoặc đang cập nhật firmware).
   khiển không biết loại máy lạnh vẫn thấy thermostat. Cluster: Identify, **On/Off**, Thermostat và (khi profile có
   mức quạt đã học) **Fan Control**.
 - **On/Off**: Tắt = `SystemMode` Off; Bật = trở lại chế độ gần nhất khác Tắt (mặc định Làm lạnh). `SystemMode` luôn
-  là trạng thái gốc, On/Off và quạt đi theo nó.
+  là trạng thái gốc, On/Off và quạt đi theo nó. Bật/tắt máy **chỉ** qua On/Off và `SystemMode`.
 - **Fan Control** (từ v1.3.0): mỗi mức quạt đã học là một tốc độ Matter, thứ tự Êm → 1…5 → Turbo (`SpeedMax` = số
   mức đã học), có **Auto** (quạt tự động) và **Rocking lên/xuống** = đảo gió (chỉ khi đã học đảo gió bật).
   `FanModeSequence`: ≥ 3 mức → Off/Low/Medium/High/Auto, 2 mức → Off/Low/High/Auto, 1 mức → Off/High/Auto.
-  Chọn tốc độ khi máy đang tắt sẽ bật máy; FanMode Off = tắt máy lạnh. Mức quạt/đảo gió chọn trên web hiện
-  ngay trong ứng dụng nhà và ngược lại; lệnh IR vẫn là lệnh đã học khớp nhất (nhiệt độ ưu tiên trước).
+  Từ v1.7.0: ghi FanMode Off / `PercentSetting` 0 / `SpeedSetting` 0 = **quạt tự động** (không tắt máy); chọn tốc
+  độ khi máy tắt được nhớ cho lần bật sau (không bật máy); sau mỗi lần ghi, cluster hiện lại quạt thật của máy.
+  Khi máy chạy với quạt tự động, `SpeedCurrent`/`PercentCurrent` = mức giữa (không bao giờ 0 khi máy chạy); máy
+  tắt thì 0. Ánh xạ nằm ở `matter_map.c` (hàm thuần, có test). Mức quạt/đảo gió chọn trên web hiện ngay trong
+  ứng dụng nhà và ngược lại; lệnh IR vẫn là lệnh đã học khớp nhất (nhiệt độ ưu tiên trước).
 - Thermostat: FeatureMap Cool, thêm Heat **chỉ khi** profile đã khóa có lệnh
   Sưởi; `ControlSequenceOfOperation` tương ứng (CoolingOnly / CoolingAndHeating).
 - `SystemMode` chấp nhận: Off, Cool, và Heat/Dry/FanOnly chỉ khi đã học. Ghi sai bị từ chối.
@@ -615,7 +644,12 @@ học IR, thử Wi-Fi mới hoặc đang cập nhật firmware).
   profile khóa → 16–30 °C. Các giới hạn này không lưu NVS để profile luôn là nguồn đúng.
 - `LocalTemperature` = nhiệt độ ngoài, cập nhật bằng `esp_matter::attribute::report()` trên CHIP thread;
   **null** khi không có giá trị hợp lệ/mới.
-- Không có `ThermostatRunningState`/PI demand: IR một chiều, không đo được máy nén.
+- `ThermostatRunningState` (từ v1.7.0) suy ra từ chế độ vì IR một chiều không đo được máy nén: Làm lạnh/Khô →
+  Cool + Fan, Sưởi → Heat + Fan, Quạt → Fan, Tắt → 0. Apple Home lấy “trạng thái hiện tại” của máy lạnh từ đây.
+  Không có PI demand, không có `ThermostatRunningMode` (chỉ hợp lệ khi có tính năng AutoMode).
+- `matter_thermostat_get_shown_state()`: những gì đang báo cho ứng dụng nhà (On/Off, chế độ, nhiệt độ đặt, trạng
+  thái chạy, quạt) và nguồn của lần đổi cuối (khởi động / ứng dụng nhà / remote gốc / thiết bị); trang Máy lạnh
+  hiện ở dòng *Ứng dụng nhà đang thấy*.
 - Thông tin ghép (passcode, discriminator, SPAKE2+ verifier) **ngẫu nhiên riêng từng thiết bị**, sinh lần đầu
   và lưu ở NVS `ac_ident`. Không sao chép NVS giữa các thiết bị. Đặt lại gốc giữ nguyên các giá trị này.
 - **Rời hệ sinh thái trên thiết bị** (`matter_thermostat_remove_home_fabric()` / `..._remove_all_home_fabrics()`):
@@ -795,7 +829,7 @@ Theo dõi remote gốc (từ v1.4.0):
 
 ### 9.1 Đã build
 
-- Toàn bộ firmware v1.6.0 build sạch cho `esp32s3` với IDF v6.0.2 + esp_matter 1.6.1 + IRremoteESP8266
+- Toàn bộ firmware v1.7.0 build sạch cho `esp32s3` với IDF v6.0.2 + esp_matter 1.6.1 + IRremoteESP8266
   2.9.0 (cờ cảnh báo mặc định của IDF, cảnh báo bị coi là lỗi với mã của dự án), có Bluetooth (NimBLE +
   CHIPoBLE): ảnh 2,11 MB (khe OTA 4 MB, còn trống 50 %), DIRAM tĩnh 47,6 %, bootloader 22,6 KB (bật app rollback);
   watchdog có panic, core dump và bảng tác vụ thêm khoảng 20 KB flash và 5 KB RAM so với v1.5.0. Thư viện IR dùng tối đa khoảng
@@ -810,7 +844,7 @@ Theo dõi remote gốc (từ v1.4.0):
 
 | Hạng mục | Cách thử | Kết quả |
 |---|---|---|
-| Logic thuần: nút BOOT, mã IR & ghép đoạn, khóa/chọn lệnh full-state, thuật toán bù, stale/backoff/CRC SHT, kiểm tra cấu hình, JSON/form/UTF-8 của web | `make -C test/host` (gcc, AddressSanitizer + UBSan) | 25 415 kiểm tra đạt; test đột biến (cấy lỗi) đều bị phát hiện |
+| Logic thuần: nút BOOT, mã IR & ghép đoạn, khóa/chọn lệnh full-state, thuật toán bù, stale/backoff/CRC SHT, kiểm tra cấu hình, JSON/form/UTF-8 của web | `make -C test/host` (gcc, AddressSanitizer + UBSan) | 25 461 kiểm tra đạt; test đột biến (cấy lỗi) đều bị phát hiện |
 | Giao diện web: mọi trang, ghép cảm biến giả, học IR giả, khóa profile, điều khiển, thuật toán, chẩn đoán, thoát; SSID chứa HTML hiển thị như văn bản | `test/web/ui_test.js` + `mock_server.py` trong Chromium headless, màn hình 390×844 | Đạt, không lỗi JavaScript |
 | BOOT: 1 lần không làm gì, 2 lần = chế độ ghép Matter, 3 lần = cấu hình; nhấn giữ hủy chuỗi; dội phím bị lọc | unit test `press_detector` | Đạt |
 | Giữ BOOT: dưới 10 s không báo gì; 12 s rồi thả = mốc 1 + “thả sau mốc 1”; 25 s = mốc 1 rồi mốc 2, thả không báo thêm; dội phím không làm đếm lại; nút giữ/kẹt từ lúc cấp điện không bao giờ tính; task không lấy mẫu lúc nút nghỉ vẫn tính đúng | unit test `hold_detector` (trong `test_button.c`) | Đạt |
@@ -823,6 +857,8 @@ Theo dõi remote gốc (từ v1.4.0):
 | Đồng bộ remote gốc: chuỗi bấm remote Sharp (Lạnh 24 → 26 °C, quạt 2/3, 16 °C bị cắt về 18 °C, Sưởi, Khô, Tắt) qua mô phỏng mắt thu đọc lại đúng trạng thái; 5 mức quạt Daikin đọc lại đúng; ánh xạ sang thermostat (Tắt, Lạnh, Khô giữ nhiệt độ đặt, Quạt, Sưởi/Auto không có, cắt giới hạn, không đảo gió); sau khi bấm remote thuật toán đòi đúng trạng thái remote (không phát lại) cả ở chế độ cảm biến ngoài | `test_irlib.cpp` (`irlib_remote`), `test_climate.c` | Đạt |
 | Giao diện: dòng “Remote gốc” (trạng thái + lệnh bị bỏ qua), tùy chọn đồng bộ bật mặc định, tắt thì hiện “không theo dõi” | `test/web/ui_test.js` | Đạt |
 | Giao diện v1.5.0: gỡ một hệ sinh thái, rời tất cả; cập nhật firmware (không chọn file, file full, file của dự án khác đều bị từ chối và trang dùng tiếp được; file đúng → báo phiên bản mới và tên Wi-Fi mới); đặt lại gốc khi đang ghép cảm biến (hỏi xác nhận lần hai) | `test/web/ui_test.js` | Đạt |
+| Ánh xạ Matter (v1.7.0): trạng thái chạy theo chế độ; quạt Off/0 %/tốc độ 0 = quạt tự động, Low/Medium/High và % ra đúng mức đã học, giới hạn mức; tốc độ hiện tại khi quạt tự động không bao giờ 0 | `make -C test/host` (`test_matter_map.c`) | Đạt |
+| Giao diện v1.7.0: dòng *Ứng dụng nhà đang thấy* (bật, chế độ, đang làm lạnh, quạt, nguồn thay đổi) | `test/web/ui_test.js` | Đạt |
 | Giao diện v1.6.0: báo cáo sự cố (tác vụ, nguyên nhân, backtrace, “bản khác”), xóa báo cáo, ngăn xếp tác vụ thấp được đánh dấu | `test/web/ui_test.js` | Đạt |
 | Giải mã địa chỉ: tra đúng hàm chứa địa chỉ, địa chỉ trả về có 2 bit cửa sổ, địa chỉ ngoài chương trình, cảnh báo khác bản build | `tools/decode_backtrace.py` với file symbols của bản build | Đạt (xem 9.1) |
 
@@ -842,6 +878,7 @@ Theo dõi remote gốc (từ v1.4.0):
 | 9. Giữ BOOT 10 s / 20 s, gỡ hệ sinh thái trên web, đặt lại gốc (xóa `nvs`, giữ mã ghép và profile IR) | Logic nút và giao diện đã thử; xóa fabric và xóa NVS cần bo + hub |
 | 10. Watchdog 15 s không báo nhầm khi dùng bình thường (ghép, học IR, cập nhật, đặt lại gốc); báo cáo sự cố được lưu và đọc lại; ngăn xếp các tác vụ còn dư | Đã build; cần bo (xem bước 17) |
 | 11. Identify từ ứng dụng nhà → LED nháy trắng | Đã build; cần hub |
+| 12. Apple Home: bật/tắt, đổi nhiệt độ, quạt, rồi bấm remote gốc – ô máy lạnh luôn khớp dòng *Ứng dụng nhà đang thấy*, không tự tắt | Đã build; ánh xạ quạt/trạng thái chạy đã test trên máy tính; cần iPhone + bộ trung tâm |
 | 7. Thuật toán trên phòng thật; mất cảm biến không phát lệnh sai | Logic đã thử; cần phần cứng |
 | AP+STA không làm mất đường mạng tới cảm biến | Thiết kế giữ STA; cần đo thực tế |
 | Cảm biến vẫn hoạt động ở hệ sinh thái cũ | Chỉ thêm fabric; cần xác nhận với hub |
@@ -854,16 +891,16 @@ bị tắt – khi đó không còn đường IPv6 tới mạng Thread.
 
 Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng thái.
 
-1. **Khởi động hai vai trò** – log có `App "ac_matter_ir" version: 1.6.0`, `room AC/thermostat endpoint 1 … fan control: N speed(s)`,
-   `device name: May lanh IR v1.6.0 (vendor DIY), firmware 1.6.0, BLE commissioning on`,
-   `BLE name: AC-XXXX-v1.6.0` và `commissioner ready: fabric index …, fabric 0x…, node 0x… (created)`; lần
+1. **Khởi động hai vai trò** – log có `App "ac_matter_ir" version: 1.7.0`, `room AC/thermostat endpoint 1 … fan control: N speed(s)`,
+   `device name: May lanh IR v1.7.0 (vendor DIY), firmware 1.7.0, BLE commissioning on`,
+   `BLE name: AC-XXXX-v1.7.0` và `commissioner ready: fabric index …, fabric 0x…, node 0x… (created)`; lần
    khởi động sau là `(restored)` với cùng fabric ID (không tạo fabric mới).
 1b. **Tìm thấy qua Bluetooth** – nhấn BOOT 2 lần; ứng dụng nRF Connect (hoặc ứng dụng nhà) thấy thiết bị
-   `AC-XXXX-v1.6.0` với dịch vụ `0xFFF6`. Thêm vào ứng dụng nhà bằng QR khi ESP **chưa** có Wi-Fi: ứng dụng
+   `AC-XXXX-v1.7.0` với dịch vụ `0xFFF6`. Thêm vào ứng dụng nhà bằng QR khi ESP **chưa** có Wi-Fi: ứng dụng
    gửi Wi-Fi, log `Disconnecting WiFi station interface`/`IP_EVENT_STA_GOT_IP` rồi `added to a home ecosystem`.
 2. **BOOT** – nhấn 1 lần: không có gì. Nhấn 2 lần: sau ~1,5 s log `BOOT x2: Matter pairing mode`,
    `pairing mode: commissioning window opened` và `CHIPoBLE advertising started`, LED nháy xanh dương; hết 15
-   phút hoặc ghép xong thì LED tắt. Nhấn 3 lần trong 1,5 s: log `portal open: SSID AC-Matter-XXXX-v1.6.0`,
+   phút hoặc ghép xong thì LED tắt. Nhấn 3 lần trong 1,5 s: log `portal open: SSID AC-Matter-XXXX-v1.7.0`,
    LED xanh lá. Nhấn 3 lần lần nữa:
    `portal already open: lifetime extended`. Giữ nút dưới 10 giây: không có gì xảy ra.
 3. **Ghép cảm biến** – theo bước 5; trang Cảm biến hiển thị endpoint và giá trị đọc thử; sau khi Lưu, trạng
@@ -931,6 +968,12 @@ Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng
   toàn vẹn nội dung. Tự quay về bản cũ chỉ có với bootloader từ v1.5.0 (file `full` hoặc file bootloader v1.5.0);
   quay về chỉ bắt được firmware làm thiết bị reset trong 60 giây đầu, không bắt được lỗi chức năng. Chưa có
   Matter OTA (cập nhật qua ứng dụng nhà).
+- **Apple Home** hiển thị Room Air Conditioner như HomeKit Heater/Cooler: chế độ chỉ có Tắt / Sưởi / Làm lạnh / Tự
+  động, theo tính năng thiết bị khai báo. Máy chỉ làm lạnh → chỉ thấy Tắt và Làm lạnh. **Khô và Quạt không hiển thị
+  được** (HomeKit không có); khi máy đang ở Khô/Quạt (đặt bằng remote hay trang web), Apple Home có thể hiện chế độ
+  khác hoặc Tắt. **Tự động** của Matter cần máy có Sưởi, và Apple Home hiện gửi Làm lạnh khi chọn Tự động với loại
+  Room Air Conditioner (lỗi Apple đã xác nhận, chưa có bản sửa). Thanh tốc độ quạt của Apple Home có thể bị mờ khi
+  quạt đang Tự động. Chưa thử trực tiếp trên iPhone.
 - **Báo cáo sự cố** cần phân vùng `coredump` (file `full` hoặc file bảng phân vùng từ v1.6.0). Địa chỉ trong báo
   cáo chỉ giải mã được bằng file symbols của đúng bản build đã lỗi. Watchdog và core dump chưa được thử trên bo.
 - Chứng thư vận hành (NOC) của Fabric B được cấp lại ở mỗi lần khởi động (ghi NVS mỗi lần bật nguồn); chưa đổi
@@ -963,7 +1006,7 @@ Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng
 
 **Phiên bản firmware** chỉ đặt một chỗ: `set(PROJECT_VER "1.5.0")` trong `CMakeLists.txt` gốc. Từ đó sinh
 ra phiên bản ứng dụng ESP-IDF, `SoftwareVersionString` Matter, `SoftwareVersion` = MAJOR·10000 + MINOR·100 +
-PATCH (10600) và hậu tố `v1.6.0` của mọi tên (macro `APP_FW_VERSION`, `components/app_state/include/app_version.h`,
+PATCH (10700) và hậu tố `v1.7.0` của mọi tên (macro `APP_FW_VERSION`, `components/app_state/include/app_version.h`,
 `main/matter_project_config.h`).
 
 **Bluetooth** (`sdkconfig.defaults`): `CONFIG_BT_ENABLED`, `CONFIG_BT_NIMBLE_ENABLED`, `CONFIG_ENABLE_CHIPOBLE`
@@ -995,7 +1038,8 @@ components/
   app_state/             nhật ký lỗi gần nhất, cờ "bận" (ghép, học IR) giữ cổng cấu hình mở,
                          app_diag.c: tóm tắt báo cáo sự cố (core dump) và ngăn xếp các tác vụ
   config_store/          NVS (2 phân vùng), app_config_t + kiểm tra hợp lệ, đặt lại gốc lúc khởi động
-  matter_thermostat/     node + endpoint Thermostat, dữ liệu ghép riêng từng thiết bị, cửa sổ ghép, QR, rời hệ sinh thái
+  matter_thermostat/     node + endpoint Thermostat, dữ liệu ghép riêng từng thiết bị, cửa sổ ghép, QR, rời hệ sinh thái,
+                         matter_map.c: ánh xạ quạt / trạng thái chạy (thuần C, có test)
   matter_commissioner/   Fabric B: issuer (RCAC/NOC/IPK), kho PAA offline, ghép/đọc/gỡ cảm biến
   remote_temperature/    subscription cảm biến, stale/backoff, cảm biến cục bộ SHT4x/SHT3x
   climate_control/       thuật toán Direct/bù, theo dõi trạng thái máy lạnh (climate_link, thuần C) + tác vụ điều khiển

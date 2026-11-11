@@ -12,6 +12,7 @@ INCLUDES := -Ishim \
 	-I$(ROOT)/components/climate_control/include \
 	-I$(ROOT)/components/remote_temperature/include \
 	-I$(ROOT)/components/config_store/include \
+	-I$(ROOT)/components/matter_thermostat/include \
 	-I$(ROOT)/components/web_config
 
 CFLAGS := -std=gnu11 -Wall -Wextra -Werror -Wno-format-truncation -O1 -g \
@@ -26,9 +27,11 @@ MODULES := \
 	$(ROOT)/components/climate_control/climate_algo.c \
 	$(ROOT)/components/remote_temperature/rt_logic.c \
 	$(ROOT)/components/config_store/app_config.c \
-	$(ROOT)/components/web_config/web_util.c
+	$(ROOT)/components/web_config/web_util.c \
+	$(ROOT)/components/matter_thermostat/matter_map.c
 
-TESTS := test_main.c test_button.c test_ir.c test_ac.c test_climate.c test_rt.c test_config.c test_web.c
+TESTS := test_main.c test_button.c test_ir.c test_ac.c test_climate.c test_rt.c test_config.c test_web.c \
+	test_matter_map.c
 
 # IR protocol library (components/irremote_esp8266, built like on the device: UNIT_TEST=1, no Arduino)
 # and its glue components/ac_profiles/ac_irlib.cpp. The library objects are compiled once (use -j).

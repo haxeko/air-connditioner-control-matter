@@ -577,7 +577,32 @@
     else rmt = c.has_remote ? c.last_remote.desc + ' · ' + fmtAge(c.last_remote_age_s) : 'đang nghe, chưa nhận lệnh nào';
     if (c.remote_enabled && c.remote_note) rmt += ' · bỏ qua lệnh cuối: ' + c.remote_note;
     text('ctl-remote', rmt);
+    text('ctl-shown', shownText(j.shown));
     msgbox('ctl-error', c.last_error);
+  }
+
+  /* What the device reports over Matter: a home app should show the same (otherwise the difference
+   * lies with the app or its hub). */
+  const SHOWN_MODES = { 0: 'Tắt', 3: 'Làm lạnh', 4: 'Sưởi', 7: 'Chỉ quạt', 8: 'Hút ẩm (khô)' };
+  const SHOWN_BY = ['khởi động', 'ứng dụng nhà', 'remote gốc', 'trang này'];
+  function shownText(s) {
+    if (!s || !s.valid) return 'Matter chưa chạy';
+    const parts = [];
+    if (!s.on) {
+      parts.push('Tắt');
+    } else {
+      let m = SHOWN_MODES[s.mode] || ('chế độ ' + s.mode);
+      if (s.mode === 3 || s.mode === 8) m += ' ' + fmtTemp(s.cool_sp);
+      else if (s.mode === 4) m += ' ' + fmtTemp(s.heat_sp);
+      parts.push('Bật · ' + m);
+      if (s.running & 2) parts.push('đang làm lạnh');
+      else if (s.running & 1) parts.push('đang sưởi');
+      if (s.has_fan) parts.push(s.fan_mode === 5 ? 'quạt tự động' : 'quạt mức ' + s.speed + '/' + s.speed_max);
+      if (s.has_fan && s.rock) parts.push('đảo gió');
+    }
+    let t = parts.join(' · ');
+    if (s.by != null && SHOWN_BY[s.by]) t += ' (đổi bởi ' + SHOWN_BY[s.by] + (s.age_s != null ? ', ' + fmtAge(s.age_s) : '') + ')';
+    return t;
   }
 
   function renderAc() {

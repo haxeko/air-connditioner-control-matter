@@ -45,3 +45,4 @@ void test_climate_algo(void);
 void test_rt_logic(void);
 void test_app_config(void);
 void test_web_util(void);
+void test_matter_map(void);

@@ -75,6 +75,37 @@ typedef struct {
     char label[33];
 } matter_fabric_info_t;
 
+/*
+ * What the home apps are shown right now (attributes of the thermostat endpoint) and what changed it
+ * last. For the web page: what a home app displays should match this; if it does, the device did
+ * its part and a difference lies with the home app or its hub.
+ */
+typedef enum {
+    MATTER_SHOWN_BY_BOOT = 0,   /* restored at start */
+    MATTER_SHOWN_BY_HOME_APP,   /* a home app or hub wrote or commanded it */
+    MATTER_SHOWN_BY_REMOTE,     /* the original IR remote */
+    MATTER_SHOWN_BY_DEVICE,     /* the web page or console of this device */
+} matter_shown_by_t;
+
+typedef struct {
+    bool valid;                 /* Matter started */
+    bool on;                    /* On/Off */
+    uint8_t system_mode;        /* TSTAT_MODE_* */
+    int16_t cool_setpoint;      /* 0.01 degC */
+    int16_t heat_setpoint;
+    uint16_t running_state;     /* ThermostatRunningState: 1 heat, 2 cool, 4 fan */
+    bool has_fan;
+    uint8_t fan_mode;           /* Fan Control FanMode: 0 off, 1 low, 2 medium, 3 high, 5 auto */
+    uint8_t speed_current;      /* 0 (off) .. speed_max */
+    uint8_t speed_max;
+    uint8_t percent_current;
+    bool rock;                  /* swing shown on */
+    uint8_t changed_by;         /* matter_shown_by_t */
+    int64_t changed_us;         /* esp_timer time of that change */
+} matter_shown_state_t;
+
+void matter_thermostat_get_shown_state(matter_shown_state_t *out);
+
 /* Commissioning state changes for user feedback (status LED). */
 typedef enum {
     MATTER_UI_WINDOW_OPENED = 0, /* pairing mode: the thermostat can be added with its QR/manual code */

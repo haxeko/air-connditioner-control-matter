@@ -1,4 +1,4 @@
-idf_component_register(SRCS "matter_thermostat.cpp" "device_identity.cpp"
+idf_component_register(SRCS "matter_thermostat.cpp" "device_identity.cpp" "matter_map.c"
                        INCLUDE_DIRS "include"
                        PRIV_INCLUDE_DIRS "."
                        REQUIRES esp_matter

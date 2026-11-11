@@ -120,6 +120,32 @@ static void put_wifi(wj_t *w, const wifi_status_t *s)
     wj_obj_end(w);
 }
 
+/* What the home apps are shown right now (matter_thermostat_get_shown_state()). */
+static void put_shown(wj_t *w)
+{
+    matter_shown_state_t s;
+    matter_thermostat_get_shown_state(&s);
+    wj_obj_begin(w, "shown");
+    wj_bool(w, "valid", s.valid);
+    if (s.valid) {
+        wj_bool(w, "on", s.on);
+        wj_uint(w, "mode", s.system_mode);
+        wj_int(w, "cool_sp", s.cool_setpoint);
+        wj_int(w, "heat_sp", s.heat_setpoint);
+        wj_uint(w, "running", s.running_state);
+        wj_bool(w, "has_fan", s.has_fan);
+        if (s.has_fan) {
+            wj_uint(w, "fan_mode", s.fan_mode);
+            wj_uint(w, "speed", s.speed_current);
+            wj_uint(w, "speed_max", s.speed_max);
+            wj_bool(w, "rock", s.rock);
+        }
+        wj_uint(w, "by", s.changed_by);
+        put_age(w, "age_s", s.changed_us);
+    }
+    wj_obj_end(w);
+}
+
 static void put_matter(wj_t *w)
 {
     matter_status_t m;
@@ -966,6 +992,7 @@ static void get_ac(api_ctx_t *c)
     matter_thermostat_get_user_state(&us);
     thermostat_caps_t tc;
     matter_thermostat_get_caps(&tc);
+    put_shown(w);
     wj_obj_begin(w, "thermostat");
     wj_uint(w, "mode", us.system_mode);
     wj_int(w, "cool_sp", us.cool_setpoint);

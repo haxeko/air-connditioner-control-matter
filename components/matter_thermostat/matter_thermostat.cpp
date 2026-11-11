@@ -23,6 +23,8 @@
 #include "device_identity.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_timer.h"
+#include "matter_map.h"
 #include "esp_matter_mem.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -51,6 +53,22 @@ constexpr uint32_t kFeatureCool = 0x2;
 constexpr uint8_t kSeqCoolingOnly = 0;
 constexpr uint8_t kSeqCoolingAndHeating = 4;
 
+static_assert(MATTER_MAP_MODE_OFF == TSTAT_MODE_OFF && MATTER_MAP_MODE_COOL == TSTAT_MODE_COOL &&
+                  MATTER_MAP_MODE_HEAT == TSTAT_MODE_HEAT && MATTER_MAP_MODE_FAN_ONLY == TSTAT_MODE_FAN_ONLY &&
+                  MATTER_MAP_MODE_DRY == TSTAT_MODE_DRY,
+              "SystemMode values");
+static_assert(MATTER_MAP_FAN_MODE_OFF == static_cast<uint8_t>(FanControl::FanModeEnum::kOff) &&
+                  MATTER_MAP_FAN_MODE_LOW == static_cast<uint8_t>(FanControl::FanModeEnum::kLow) &&
+                  MATTER_MAP_FAN_MODE_MEDIUM == static_cast<uint8_t>(FanControl::FanModeEnum::kMedium) &&
+                  MATTER_MAP_FAN_MODE_HIGH == static_cast<uint8_t>(FanControl::FanModeEnum::kHigh) &&
+                  MATTER_MAP_FAN_MODE_ON == static_cast<uint8_t>(FanControl::FanModeEnum::kOn) &&
+                  MATTER_MAP_FAN_MODE_AUTO == static_cast<uint8_t>(FanControl::FanModeEnum::kAuto),
+              "FanMode values");
+static_assert(MATTER_MAP_RUNNING_HEAT == static_cast<uint16_t>(Thermostat::RelayStateBitmap::kHeat) &&
+                  MATTER_MAP_RUNNING_COOL == static_cast<uint16_t>(Thermostat::RelayStateBitmap::kCool) &&
+                  MATTER_MAP_RUNNING_FAN == static_cast<uint16_t>(Thermostat::RelayStateBitmap::kFan),
+              "RelayStateBitmap values");
+
 chip::CommonCaseDeviceServerInitParams sServerParams;
 uint16_t sEndpointId = 0;
 thermostat_caps_t sCaps;
@@ -78,6 +96,7 @@ bool sHasFanCluster;
 uint8_t sLastOnMode = TSTAT_MODE_COOL;
 bool sSyncing; /* writes made by this file: ignore the resulting callbacks */
 bool sFromRemote; /* thermostat writes that show the state set with the IR remote: no user callback */
+bool sApplying;   /* SetUserStateWork() is writing (remote or this device): not a home app change */
 
 void NotifyUi(matter_ui_event_t ev)
 {
@@ -91,6 +110,19 @@ struct Guard
     Guard() { xSemaphoreTake(sLock, portMAX_DELAY); }
     ~Guard() { xSemaphoreGive(sLock); }
 };
+
+/* What the home apps are shown (see matter_thermostat_get_shown_state()); sLock. */
+matter_shown_state_t sShown;
+uint8_t sChangedBy = MATTER_SHOWN_BY_BOOT;
+int64_t sChangedUs;
+
+void NoteChange(matter_shown_by_t by)
+{
+    const int64_t now = esp_timer_get_time();
+    Guard g;
+    sChangedBy = static_cast<uint8_t>(by);
+    sChangedUs = now;
+}
 
 bool ModeAllowed(uint8_t mode)
 {
@@ -176,13 +208,37 @@ uint8_t CurrentMode()
     return sUser.system_mode;
 }
 
-/* CHIP thread. Show the current power/fan/swing in the On/Off and Fan Control clusters. */
+/* CHIP thread, end of SyncPowerAndFan(). */
+void UpdateShown(uint8_t mode, FanControlCluster * fan)
+{
+    matter_shown_state_t s = {};
+    s.valid = true;
+    s.on = mode != TSTAT_MODE_OFF;
+    s.system_mode = mode;
+    s.running_state = matter_map_running_state(mode);
+    if (fan != nullptr) {
+        s.has_fan = true;
+        s.fan_mode = static_cast<uint8_t>(fan->GetFanMode());
+        s.speed_current = fan->GetSpeedCurrent();
+        s.speed_max = sSpeedCount;
+        s.percent_current = fan->GetPercentCurrent();
+        s.rock = fan->GetRockSetting().Has(FanControl::RockBitmap::kRockUpDown);
+    }
+    Guard g;
+    sShown = s;
+}
+
+/* CHIP thread. Show the current power/fan/swing in the On/Off and Fan Control clusters and the
+ * running state in the Thermostat cluster. */
 void SyncPowerAndFan()
 {
     const uint8_t mode = CurrentMode();
     sSyncing = true;
     esp_matter_attr_val_t on = esp_matter_bool(mode != TSTAT_MODE_OFF);
     attribute::update(sEndpointId, OnOff::Id, OnOff::Attributes::OnOff::Id, &on);
+    /* report(): stored and sent to the subscribers, without a callback of ours */
+    esp_matter_attr_val_t running = esp_matter_bitmap16(matter_map_running_state(mode));
+    attribute::report(sEndpointId, Thermostat::Id, Thermostat::Attributes::ThermostatRunningState::Id, &running);
     FanControlCluster * fan = FanCluster();
     if (fan != nullptr) {
         uint8_t fanCopy;
@@ -194,15 +250,19 @@ void SyncPowerAndFan()
         }
         const uint8_t speed = SpeedOfFan(fanCopy);
         if (mode == TSTAT_MODE_OFF) {
-            fan->SetFanMode(FanControl::FanModeEnum::kOff);
+            fan->SetFanMode(FanControl::FanModeEnum::kOff); /* also zeroes the current speed */
         } else if (speed == 0) {
-            /* Auto, or a level that is not learned (the IR command then uses the default fan) */
+            /* Auto, or a level that is not learned (the IR command then uses the default fan). The AC
+             * picks the speed itself; the current speed is shown as the middle one, never 0: a home
+             * app reads a running fan at 0 % as "off" (Apple Home then shows the AC as off). */
             fan->SetFanMode(FanControl::FanModeEnum::kAuto);
+            const uint8_t shown = matter_map_auto_shown_speed(sSpeedCount);
+            fan->SetSpeedCurrent(shown);
+            fan->SetPercentCurrent(matter_map_percent_of_speed(shown, sSpeedCount));
         } else {
             fan->SetSpeedSetting(chip::app::DataModel::MakeNullable(speed));
             fan->SetSpeedCurrent(speed);
-            chip::app::DataModel::Nullable<chip::Percent> pct = fan->GetPercentSetting();
-            fan->SetPercentCurrent(pct.IsNull() ? 0 : pct.Value());
+            fan->SetPercentCurrent(matter_map_percent_of_speed(speed, sSpeedCount));
         }
         if (fan->GetFeatureMap().Has(FanControl::Feature::kRocking)) {
             chip::BitMask<FanControl::RockBitmap> rock;
@@ -213,6 +273,7 @@ void SyncPowerAndFan()
         }
     }
     sSyncing = false;
+    UpdateShown(mode, fan);
 }
 
 void SyncPowerAndFanWork(intptr_t)
@@ -274,40 +335,29 @@ class AcFanDelegate final : public FanControl::Delegate
 public:
     FanStatus HandleStep(FanControl::StepDirectionEnum, bool, bool) override { return FanStatus::UnsupportedCommand; }
 
-    /* A home app changed FanMode / PercentSetting / SpeedSetting (CHIP thread). */
+    /* A home app changed FanMode / PercentSetting / SpeedSetting (CHIP thread).
+     * Power belongs to On/Off and SystemMode only. A fan set to Off or 0 % (a slider at its minimum,
+     * or a home app writing back a speed it does not know) selects the AC's automatic fan and never
+     * turns the AC off; a fan chosen while the AC is off is used at the next power on and does not
+     * turn it on. Home apps that send such writes on their own made the AC switch itself off. */
     void OnFanDriveStateChanged(const FanControl::FanDriveState & state) override
     {
         if (sSyncing || !sStarted) {
             return;
         }
-        uint8_t speed = 0;
-        if (!state.speedSetting.IsNull()) {
-            speed = state.speedSetting.Value();
-        } else if (!state.percentSetting.IsNull() && sSpeedCount > 0) {
-            speed = static_cast<uint8_t>((sSpeedCount * state.percentSetting.Value() + 99) / 100);
-        }
-        if (state.mode == FanControl::FanModeEnum::kOff || (state.mode != FanControl::FanModeEnum::kAuto && speed == 0)) {
-            ScheduleMode(TSTAT_MODE_OFF); /* the fan of an AC is off only when the AC is off */
-            return;
-        }
-        uint8_t fan = AC_FAN_AUTO;
-        if (state.mode != FanControl::FanModeEnum::kAuto && sSpeedCount > 0) {
-            fan = sSpeeds[(speed > sSpeedCount ? sSpeedCount : speed) - 1];
-        }
+        const uint8_t fan = matter_map_fan_from_drive(
+            static_cast<uint8_t>(state.mode), state.speedSetting.IsNull() ? -1 : state.speedSetting.Value(),
+            state.percentSetting.IsNull() ? -1 : state.percentSetting.Value(), sSpeeds, sSpeedCount);
         {
             Guard g;
             sFan = fan;
         }
-        FanControlCluster * c = FanCluster();
-        if (c != nullptr && fan != AC_FAN_AUTO) {
-            c->SetSpeedCurrent(SpeedOfFan(fan)); /* allowed from the change callback */
-            c->SetPercentCurrent(state.percentSetting.IsNull() ? 0 : state.percentSetting.Value());
-        }
-        ESP_LOGI(TAG, "fan from Matter: %s", ac_fan_name(fan));
+        NoteChange(MATTER_SHOWN_BY_HOME_APP);
+        ESP_LOGI(TAG, "fan from Matter: %s%s", ac_fan_name(fan),
+                 CurrentMode() == TSTAT_MODE_OFF ? " (used at the next power on)" : "");
         NotifyFan();
-        if (CurrentMode() == TSTAT_MODE_OFF) {
-            ScheduleMode(kModeLastOn); /* choosing a fan speed turns the AC on */
-        }
+        /* the cluster now shows what was written (e.g. Off): show the AC's real fan again */
+        LogErrorOnFailure(chip::DeviceLayer::PlatformMgr().ScheduleWork(SyncPowerAndFanWork, 0));
     }
 
     void OnRockSettingChanged(chip::BitMask<FanControl::RockBitmap> value) override
@@ -319,8 +369,10 @@ public:
             Guard g;
             sSwing = value.Has(FanControl::RockBitmap::kRockUpDown) ? AC_SWING_ON : AC_SWING_OFF;
         }
+        NoteChange(MATTER_SHOWN_BY_HOME_APP);
         ESP_LOGI(TAG, "swing from Matter: %s", sSwing == AC_SWING_ON ? "on" : "off");
         NotifyFan();
+        LogErrorOnFailure(chip::DeviceLayer::PlatformMgr().ScheduleWork(SyncPowerAndFanWork, 0));
     }
 };
 
@@ -338,6 +390,8 @@ esp_err_t AttributeCallback(attribute::callback_type_t type, uint16_t endpoint_i
         /* only commands from controllers: not our own sync, not the restore while the stack starts */
         if (type == attribute::POST_UPDATE && attribute_id == OnOff::Attributes::OnOff::Id && !sSyncing && !sRestoring &&
             sStarted) {
+            ESP_LOGI(TAG, "power %s from Matter (On/Off)", val->val.b ? "on" : "off");
+            NoteChange(MATTER_SHOWN_BY_HOME_APP);
             ScheduleMode(val->val.b ? kModeLastOn : static_cast<intptr_t>(TSTAT_MODE_OFF));
         }
         return ESP_OK;
@@ -397,6 +451,9 @@ esp_err_t AttributeCallback(attribute::callback_type_t type, uint16_t endpoint_i
                 mask = TSTAT_CHANGED_HEAT_SP;
             }
         }
+    }
+    if (mask && !sRestoring && !sApplying) {
+        NoteChange(MATTER_SHOWN_BY_HOME_APP);
     }
     if (mask && !sRestoring && !sFromRemote) {
         NotifyUser(mask);
@@ -629,6 +686,7 @@ void InitAfterServer(intptr_t)
     if (sHasFanCluster) {
         FanControl::SetDefaultDelegate(sEndpointId, &sFanDelegate);
     }
+    NoteChange(MATTER_SHOWN_BY_BOOT);
     SyncPowerAndFan();
 
     OpenWindowIfUncommissioned();
@@ -666,6 +724,8 @@ struct UserStateRequest
 void SetUserStateWork(intptr_t arg)
 {
     auto * req = reinterpret_cast<UserStateRequest *>(arg);
+    NoteChange(req->fromRemote ? MATTER_SHOWN_BY_REMOTE : MATTER_SHOWN_BY_DEVICE);
+    sApplying = true;
     sFromRemote = req->fromRemote; /* attribute::update() runs the callbacks synchronously */
     if (req->mask & TSTAT_CHANGED_MODE) {
         esp_matter_attr_val_t v = esp_matter_enum8(req->state.system_mode);
@@ -680,6 +740,7 @@ void SetUserStateWork(intptr_t arg)
         attribute::update(sEndpointId, Thermostat::Id, Thermostat::Attributes::OccupiedHeatingSetpoint::Id, &v);
     }
     sFromRemote = false;
+    sApplying = false;
     if (req->hasFan) {
         {
             Guard g;
@@ -770,6 +831,7 @@ extern "C" esp_err_t matter_thermostat_set_fan(uint8_t fan, uint8_t swing)
         sSwing = swing;
     }
     if (sStarted) {
+        NoteChange(MATTER_SHOWN_BY_DEVICE);
         return chip::DeviceLayer::PlatformMgr().ScheduleWork(SyncPowerAndFanWork, 0) == CHIP_NO_ERROR ? ESP_OK : ESP_FAIL;
     }
     return ESP_OK; /* shown by InitAfterServer() */
@@ -869,6 +931,10 @@ extern "C" esp_err_t matter_thermostat_create(const thermostat_caps_t * caps, th
     if (tstat == nullptr) {
         return ESP_FAIL;
     }
+    /* ThermostatRunningState (optional attribute): what the AC is doing, matter_map_running_state(). */
+    if (cluster::thermostat::attribute::create_thermostat_running_state(tstat, 0) == nullptr) {
+        return ESP_FAIL;
+    }
     /* Setpoint limits = what the AC profile can execute. */
     using namespace Thermostat::Attributes;
     CreateLimit(tstat, AbsMinCoolSetpointLimit::Id, caps->cool_min, ATTRIBUTE_FLAG_NONE);
@@ -957,6 +1023,20 @@ extern "C" void matter_thermostat_get_status(matter_status_t * out)
         out->node_label[n] = 0;
         esp_matter_mem_free(val.val.a.b);
     }
+}
+
+extern "C" void matter_thermostat_get_shown_state(matter_shown_state_t * out)
+{
+    if (sLock == nullptr) {
+        memset(out, 0, sizeof(*out));
+        return;
+    }
+    Guard g;
+    *out = sShown;
+    out->cool_setpoint = sUser.cool_setpoint;
+    out->heat_setpoint = sUser.heat_setpoint;
+    out->changed_by = sChangedBy;
+    out->changed_us = sChangedUs;
 }
 
 extern "C" void matter_thermostat_get_user_state(thermostat_user_state_t * out)
