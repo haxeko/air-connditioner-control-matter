@@ -6,8 +6,8 @@ Net names are the names that end up in the netlist and on the board.
 
 PROJECT = "ac_ir_s3"
 TITLE = "AC IR Matter module (ESP32-S3-WROOM-1-N16R8)"
-REV = "1.3"
-DATE = "2026-11-09"
+REV = "1.4"
+DATE = "2026-11-11"
 COMPANY = "DIY - air-connditioner-control-matter"
 BOARD_W, BOARD_H = 30.0, 39.0   # board outline (mm)
 
@@ -23,7 +23,8 @@ R1206 = "Resistor_SMD:R_1206_3216Metric_Pad1.30x1.75mm_HandSolder"
 
 # ref: lib symbol, value, footprint, {pin: net}, extra fields (MPN, LCSC, Note)
 PARTS = {
-    "U1": dict(lib="RF_Module:ESP32-S3-WROOM-1", value="ESP32-S3-WROOM-1-N16R8", fp="RF_Module:ESP32-S3-WROOM-1",
+    # Footprint from the project library: the KiCad one with 0.3 mm thermal vias (see make_pcb.py).
+    "U1": dict(lib="RF_Module:ESP32-S3-WROOM-1", value="ESP32-S3-WROOM-1-N16R8", fp="ac_ir_s3:ESP32-S3-WROOM-1",
                pins={"1": "GND", "40": "GND", "41": "GND", "2": "+3V3", "3": "EN", "27": "IO0",
                      "4": "IR_TX", "5": "IR_RX", "25": "RGB", "36": "RXD0", "37": "TXD0"},
                fields={"Spec": "Wi-Fi/BLE module, 16 MB flash, 8 MB octal PSRAM", "MPN": "ESP32-S3-WROOM-1-N16R8"}),
@@ -64,14 +65,17 @@ PARTS = {
                fields={"Spec": "IR receiver 38 kHz, pinout OUT-GND-VS (TSOP38238, VS1838B)", "MPN": "TSOP38238"}),
     "SW1": dict(lib="Switch:SW_Push", value="BOOT", fp="Button_Switch_SMD:SW_SPST_PTS810",
                 pins={"1": "IO0", "2": "GND"}, fields={"Spec": "tactile switch 4.2x3.2 mm SMD", "MPN": "C&K PTS810 SJM 250 SMTR LFS"}),
-    # Programming pads on the bottom side, 2.54 mm pitch: 3V3, TX, RX, GND, IO0 (IO0 next to GND).
+    # Programming pads on the bottom side, 2.54 mm pitch: EN, 3V3, TX, RX, GND, IO0 (IO0 next to GND).
+    # EN is optional: reset without removing power, or automatic reset from a USB-UART adapter (RTS).
     "TP1": dict(lib="Connector:TestPoint", value="3V3", fp="TestPoint:TestPoint_Pad_1.5x1.5mm", pins={"1": "+3V3"}, fields={}),
     "TP2": dict(lib="Connector:TestPoint", value="TX", fp="TestPoint:TestPoint_Pad_1.5x1.5mm", pins={"1": "TXD0"}, fields={}),
     "TP3": dict(lib="Connector:TestPoint", value="RX", fp="TestPoint:TestPoint_Pad_1.5x1.5mm", pins={"1": "RXD0"}, fields={}),
     "TP4": dict(lib="Connector:TestPoint", value="GND", fp="TestPoint:TestPoint_Pad_1.5x1.5mm", pins={"1": "GND"}, fields={}),
     "TP5": dict(lib="Connector:TestPoint", value="IO0", fp="TestPoint:TestPoint_Pad_1.5x1.5mm", pins={"1": "IO0"}, fields={}),
+    "TP6": dict(lib="Connector:TestPoint", value="EN", fp="TestPoint:TestPoint_Pad_1.5x1.5mm", pins={"1": "EN"}, fields={}),
     "R1": dict(lib="Device:R", value="10k", fp=R0603, spec="0603 1%", pins={"1": "+3V3", "2": "EN"}, fields={"LCSC": "C25804"}),
-    "R2": dict(lib="Device:R", value="10k", fp=R0603, spec="0603 1%", pins={"1": "+3V3", "2": "IO0"}, fields={"LCSC": "C25804"}),
+    # No pull-up resistor on IO0: the chip pulls GPIO0 up by itself at reset (strapping default, about
+    # 45 kOhm), as in Espressif's module reference schematic, and the firmware enables the pull-up too.
     "R3": dict(lib="Device:R", value="5.1k", fp=R0603, spec="0603 1%", pins={"1": "CC1", "2": "GND"}, fields={"LCSC": "C23186"}),
     "R4": dict(lib="Device:R", value="5.1k", fp=R0603, spec="0603 1%", pins={"1": "CC2", "2": "GND"}, fields={"LCSC": "C23186"}),
     "R5": dict(lib="Device:R", value="100", fp=R0603, spec="0603 1%", pins={"1": "+3V3", "2": "IR_VS"}, fields={"LCSC": "C22775"}),
@@ -80,9 +84,10 @@ PARTS = {
     "R8": dict(lib="Device:R", value="18 1/4W", fp=R1206, spec="1206 1% 0.25 W", pins={"1": "+5V", "2": "IR_A"},
                fields={}),
     "R9": dict(lib="Device:R", value="100", fp=R0603, spec="0603 1%", pins={"1": "RGB", "2": "RGB_DIN"}, fields={"LCSC": "C22775"}),
-    "C1": dict(lib="Device:C", value="1u", fp=C0603, spec="0603 X5R 25 V", pins={"1": "+3V3", "2": "GND"}, fields={"LCSC": "C15849"}),
     "C2": dict(lib="Device:C", value="4.7u", fp=C0805, spec="0805 X5R 25 V", pins={"1": "+5V", "2": "GND"}, fields={"LCSC": "C1779"}),
-    "C3": dict(lib="Device:C", value="10u", fp=C0805, spec="0805 X5R 25 V", pins={"1": "+3V3", "2": "GND"}, fields={"LCSC": "C15850"}),
+    # 22 uF + 100 nF at the module supply pin, as in the ESP32-S3-WROOM-1 datasheet (Wi-Fi TX current bursts).
+    # C3 sits 2.5 mm from the LDO output pin and is its output capacitor too (the AP2112K needs >= 1 uF).
+    "C3": dict(lib="Device:C", value="22u", fp=C0805, spec="0805 X5R 25 V", pins={"1": "+3V3", "2": "GND"}, fields={"LCSC": "C45783"}),
     "C4": dict(lib="Device:C", value="100n", fp=C0603, spec="0603 X7R 50 V", pins={"1": "+3V3", "2": "GND"}, fields={"LCSC": "C14663"}),
     "C5": dict(lib="Device:C", value="1u", fp=C0603, spec="0603 X5R 25 V", pins={"1": "EN", "2": "GND"}, fields={"LCSC": "C15849"}),
     "C6": dict(lib="Device:C", value="4.7u", fp=C0805, spec="0805 X5R 25 V", pins={"1": "IR_VS", "2": "GND"}, fields={"LCSC": "C1779"}),

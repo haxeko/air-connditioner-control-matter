@@ -16,10 +16,10 @@ def patch(path):
         "min_copper_edge_clearance": 0.3,
         "min_hole_clearance": 0.2,
         "min_hole_to_hole": 0.25,
-        # The ESP32-S3-WROOM-1 library footprint has 0.2 mm thermal vias under its GND pad.
-        "min_through_hole_diameter": 0.2,
+        # Smallest hole on the board: 0.3 mm (vias, and the module's thermal vias: gen/local_lib.py).
+        "min_through_hole_diameter": 0.3,
         "min_track_width": 0.2,
-        "min_via_annular_width": 0.1,
+        "min_via_annular_width": 0.13,
         "min_via_diameter": 0.5,
         "min_text_height": 0.8,
         "min_text_thickness": 0.12,

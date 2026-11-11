@@ -27,12 +27,12 @@ SCH = {
     "D5": (66.04, 30.48, 180), "D6": (66.04, 40.64, 180), "F1": (86.36, 30.48, 90),
     "J2": (93.98, 60.96, 0),
     # 3.3 V regulator
-    "C2": (109.22, 36.83, 0), "U2": (124.46, 35.56, 0), "C1": (142.24, 36.83, 0),
+    "C2": (109.22, 36.83, 0), "U2": (124.46, 35.56, 0),
     # ESP32-S3 module and decoupling
     "U1": (182.88, 99.06, 0), "C3": (203.2, 62.23, 0), "C4": (210.82, 62.23, 0),
     # EN power-on reset, BOOT
     "R1": (106.68, 72.39, 0), "C5": (114.3, 83.82, 0),
-    "R2": (134.62, 72.39, 0), "SW1": (144.78, 83.82, 270),
+    "SW1": (144.78, 83.82, 270),
     # IR transmitter
     "R8": (43.18, 110.49, 0), "C8": (58.42, 110.49, 0),
     "D2": (43.18, 123.19, 90), "D3": (43.18, 135.89, 90),
@@ -43,8 +43,8 @@ SCH = {
     "D1": (238.76, 27.94, 180), "C7": (279.4, 34.29, 0),
     "R9": (243.84, 53.34, 90), "D4": (269.24, 53.34, 0),
     # Programming pads (bottom side of the board)
-    "TP1": (236.22, 101.6, 0), "TP2": (246.38, 101.6, 0), "TP3": (256.54, 101.6, 0),
-    "TP4": (266.7, 101.6, 0), "TP5": (276.86, 101.6, 0),
+    "TP6": (236.22, 101.6, 0), "TP1": (243.84, 101.6, 0), "TP2": (251.46, 101.6, 0), "TP3": (259.08, 101.6, 0),
+    "TP4": (266.7, 101.6, 0), "TP5": (274.32, 101.6, 0),
 }
 
 # Reference / Value positions (x, y, justify) where the defaults collide with stubs or symbols.
@@ -61,9 +61,9 @@ FIELDS = {
     "D5": ((66.04, 26.67, "center"), (66.04, 34.29, "center")),
     "D6": ((66.04, 36.83, "center"), (66.04, 44.45, "center")),
 }
-for _i in range(5):
-    _x = 236.22 + 10.16 * _i
-    FIELDS["TP%d" % (_i + 1)] = ((_x + 1.27, 95.25, "left"), (_x + 1.27, 97.79, "left"))
+for _ref in ("TP1", "TP2", "TP3", "TP4", "TP5", "TP6"):
+    _x = SCH[_ref][0]
+    FIELDS[_ref] = ((_x + 1.27, 95.25, "left"), (_x + 1.27, 97.79, "left"))
 
 # Wires between pins (straight lines through the listed points). label = (name, direction of text).
 WIRES = [
@@ -97,14 +97,16 @@ GROUPS = [  # title, x1, y1, x2, y2
 
 NOTES = [
     (102.87, 99.06, ["BOOT x2: Matter pairing, x3: setup Wi-Fi", "Hold BOOT (or short IO0 to GND) at power-up:",
-                     "ROM download mode, flash through UART0 pads"]),
-    (229.87, 115.57, ["2.54 mm pitch: 3V3 TX RX GND IO0", "Short IO0 to GND at power-up to flash"]),
+                     "ROM download mode, flash through UART0 pads",
+                     "IO0: pulled up inside the chip (no resistor)"]),
+    (229.87, 113.03, ["2.54 mm pitch: EN 3V3 TX RX GND IO0", "IO0 to GND at power-up or reset: flash mode",
+                      "EN: short to GND = reset; adapter RTS (optional)"]),
     (17.78, 85.09, ["Each input has its own Schottky diode (PH2.0 reverse-polarity safe)"]),
     (12.7, 177.8, [
         "Firmware defaults: IR TX GPIO4 (active high), IR RX GPIO5 (active low), BOOT GPIO0, RGB LED GPIO48 (WS2812).",
         "N16R8: GPIO35-37 belong to the octal PSRAM, keep them unconnected. GPIO8/9/19/20 are unused.",
         "USB-C and PH2.0 supply 5 V only. Flashing, logs and REPL console: UART0 pads with a 3.3 V USB-UART adapter.",
-        "No reset button: EN has an RC power-on reset, remove power to reset.",
+        "No reset button: EN has an RC power-on reset. Reset = remove power, or short the EN pad to GND.",
         "IR LED current: (5 V - 0.4 V - 2 x 1.35 V) / 18 ohm = ~100 mA peak at 33 % carrier duty.",
         "U4: TSOP38238, VS1838B or any 38 kHz receiver with pinout OUT-GND-VS (check the datasheet).",
     ]),

@@ -6,6 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 PY=${PYTHON:-python3}
 P=ac_ir_s3
+$PY gen/local_lib.py
 $PY gen/make_sch.py $P.kicad_sch
 kicad-cli sch erc --severity-all --exit-code-violations -o gen/erc.rpt $P.kicad_sch
 kicad-cli sch export netlist --format kicadsexpr -o gen/$P.net $P.kicad_sch

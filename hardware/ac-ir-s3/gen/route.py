@@ -14,7 +14,10 @@ How it works
   (PathFinder). Nets in conflict are ripped up and rerouted until no copper of two nets is closer than
   the clearance. A final pass routes any remaining net with all other copper as hard obstacles.
 - GND is not routed as a net: it is the copper pour on both layers, and every surface-mount GND pad
-  gets a short track to its own via into the bottom pour.
+  gets a short track to its own via into the pour of the other layer.
+- GND stitching: tracks on the bottom layer cut the ground plane into pieces. Every piece of pour that
+  has no connection to the other layer gets a via (so no copper is thrown away as an island and return
+  currents can change layer next to the cut), then a coarse grid of vias ties both pours together.
 """
 import heapq
 import math
@@ -46,14 +49,21 @@ VIA_COST = 40.0                 # in grid steps
 TURN_COST = 0.4
 PRES0, PRES_MULT, HIST_INC = 0.6, 1.7, 1.5
 MAX_ITER = 40
-# Areas where a component body sits on the top copper: no top-layer tracks or vias there.
+# Areas where a component body sits on the top copper: no top-layer signal tracks or vias there.
 _ux, _uy, _ = PLACE["U1"]
 _jx, _jy, _ = PLACE["J1"]
-NO_TOP = [(_ux - 8.0, -1.0, _ux + 8.0, _uy + 11.75),        # module body inside its pad ring
-          (-1.0, _jy - 4.52, _jx + 2.4, _jy + 4.52)]         # USB-C shell (pads start at x + 2.48)
+NO_TOP_MODULE = (_ux - 8.0, -1.0, _ux + 8.0, _uy + 11.75)   # module body inside its pad ring
+NO_TOP_SHELL = (-1.0, _jy - 4.52, _jx + 2.4, _jy + 4.52)    # USB-C shell (pads start at x + 2.48)
+# Under the module the top layer is one solid GND pour: GND vias (covered by solder mask) are welcome
+# there, they tie the pour to the bottom plane on both sides of the tracks that cross under the module.
+STITCH_PITCH = 3.0              # GND stitching grid (mm), rows staggered
+STITCH_GAP = 2.2                # a stitching via stays this far from other GND vias and plated GND pads
+STITCH_PAD_GAP = 0.25           # stitching via copper to GND pad copper (no via in or against a pad)
+STITCH_MIN_AREA = 1.0           # pieces of pour smaller than this (mm2) are not worth a via
 # GND via sites kept free of other nets before routing (offset from a footprint position): where a
-# GND pad is boxed in by power tracks unless its drop via has a reserved place (LDO input/output caps).
-GND_VIA_SITES = [("C1", -0.8, -1.25)]   # between the GND pads of C1 and C2, under the LDO: serves both
+# GND pad is boxed in by power tracks unless its drop via has a reserved place.
+# LDO GND pin: it sits between the two +5 V pins, its via goes under the body next to the 2-pin row.
+GND_VIA_SITES = [("U2", 0.0, -0.5)]
 ORDER = ["/CC1", "/CC2", "VBUS", "/PH_5V", "/VIN", "+5V", "/EN", "/IR_TX", "/IR_RX",
          "/IR_A", "/IR_M", "/IR_K", "+3V3", "/IO0", "/IR_GATE", "/IR_VS",
          "/RGB", "/RGB_DIN", "/LED_VDD", "/TXD0", "/RXD0"]
@@ -172,9 +182,10 @@ class Maps:
         self.st = {(l, k, m): Layer() for l in (0, 1) for k in CLASSES for m in "tv"}   # pads, holes
         self.dy = {(l, k, m): Layer() for l in (0, 1) for k in CLASSES for m in "tv"}   # tracks, vias
         X, Y = np.meshgrid(XS, YS)
-        self.notop = np.zeros((NY, NX), bool)
-        for x0, y0, x1, y1 in NO_TOP:
-            self.notop |= (X >= x0) & (X <= x1) & (Y >= y0) & (Y <= y1)
+        x0, y0, x1, y1 = NO_TOP_SHELL
+        self.noshell = (X >= x0) & (X <= x1) & (Y >= y0) & (Y <= y1)
+        x0, y0, x1, y1 = NO_TOP_MODULE
+        self.notop = self.noshell | ((X >= x0) & (X <= x1) & (Y >= y0) & (Y <= y1))
         ed = self.edge_dist(X, Y)
         self.edge_t = {k: ed < EDGE + c["w"] / 2 + MARGIN for k, c in CLASSES.items()}
         self.edge_v = {k: ed < EDGE + c["via"] / 2 + MARGIN for k, c in CLASSES.items()}
@@ -197,15 +208,16 @@ class Maps:
 
     def hard(self, net, k, dyn_hard):
         """Hard-blocked track cells per layer and via cells for 'net' of class k."""
+        notop = self.noshell if net == "GND" else self.notop
         tb = []
         for l in (0, 1):
             b = (self.st[(l, k, "t")].other(net) > 0) | self.edge_t[k]
             if dyn_hard:
                 b |= self.dy[(l, k, "t")].other(net) > 0
             if l == 0:
-                b |= self.notop
+                b |= notop
             tb.append(b)
-        vb = self.edge_v[k] | self.notop
+        vb = self.edge_v[k] | notop
         for l in (0, 1):
             vb |= self.st[(l, k, "v")].other(net) > 0
             if dyn_hard:
@@ -305,8 +317,10 @@ class Router:
         self.board = board
         self.maps = Maps()
         self.pads = {}                      # net -> [Item]
-        for fp in board.GetFootprints():
-            for pad in fp.Pads():
+        # Fixed order (reference, pad number, position): the file order follows random UUIDs, and the
+        # routing result must not change from one run to the next.
+        for fp in sorted(board.GetFootprints(), key=lambda f: f.GetReference()):
+            for pad in sorted(fp.Pads(), key=lambda p: (p.GetNumber(), p.GetPosition().x, p.GetPosition().y)):
                 it = pad_item(pad)
                 self.maps.paint(it, dyn=False)
                 if it.net and not it.net.startswith("#") and not it.net.startswith("unconnected-"):
@@ -521,18 +535,18 @@ class Router:
         return cells, centres
 
     def gnd_drops(self, reach=3.5, via_gap=0.9):
-        """Every surface-mount GND pad on the top layer gets a short track to a via into the bottom pour
-        (a new via, or an existing GND via / plated GND pad nearby)."""
+        """Every surface-mount GND pad gets a short track on its own layer to a via into the pour of the
+        other layer (a new via, or an existing GND via / plated GND pad nearby)."""
         k = "Default"
         w = CLASSES[k]["w"]
         vr = CLASSES[k]["via"] / 2
         placed = shared = failed = 0
         seen = set()
-        for it in self.pads.get("GND", []):
+        smd = [it for it in self.pads.get("GND", []) if it.pad.GetAttribute() == pcbnew.PAD_ATTRIB_SMD]
+        for it in smd:
             pad = it.pad
-            if pad.GetAttribute() != pcbnew.PAD_ATTRIB_SMD or 0 not in it.layers:
-                continue
-            key = (round(it.geo[0], 3), round(it.geo[1], 3))
+            layer = it.layers[0]
+            key = (layer, round(it.geo[0], 3), round(it.geo[1], 3))
             if key in seen:
                 continue                     # stacked pads share one via
             seen.add(key)
@@ -543,21 +557,24 @@ class Router:
                    o.pad.GetAttribute() == pcbnew.PAD_ATTRIB_PTH for o in self.pads["GND"]):
                 continue                     # connector GND pins: tied by its plated shell pins and the pour
             tblock, vblock = self.maps.hard("GND", k, dyn_hard=True)
-            src = set(l * NC + c for l, c in self.allowed_cells(it, w) if l == 0)
+            src = set(layer * NC + c for l, c in self.allowed_cells(it, w) if l == layer)
             for s_ in src:
-                tblock[0].ravel()[s_] = False
+                tblock[layer].ravel()[s_ % NC] = False
             win = it.window(reach)
             i0, i1, j0, j1 = win
             X, Y = np.meshgrid(XS[i0:i1 + 1], YS[j0:j1 + 1])
             d = it.dist(X, Y)
             ok = (d > vr) & (d < reach)
             ok &= ~(vblock[j0:j1 + 1, i0:i1 + 1] | tblock[0][j0:j1 + 1, i0:i1 + 1] | tblock[1][j0:j1 + 1, i0:i1 + 1])
-            old, centres = self.gnd_copper(0, win)
+            for o in smd:                    # no via in another GND pad either
+                if o is not it:
+                    ok &= o.dist(X, Y) > vr
+            old, centres = self.gnd_copper(layer, win)
             for cx, cy in centres:           # keep new vias apart from existing GND vias
                 ok &= np.hypot(X - cx, Y - cy) >= via_gap
             jj, ii = np.nonzero(ok)
-            new_t = set(int((j + j0) * NX + (i + i0)) for j, i in zip(jj, ii))
-            no_via = np.ones_like(vblock)    # the track itself stays on the top layer
+            new_t = set(int(layer * NC + (j + j0) * NX + (i + i0)) for j, i in zip(jj, ii))
+            no_via = np.ones_like(vblock)    # the track itself stays on the pad's layer
             path = astar(src, new_t | old, tblock, no_via, win) if (new_t or old) else None
             if not path:
                 print("  no room for a GND via at %s.%s" % (ref, pad.GetNumber()))
@@ -573,27 +590,128 @@ class Router:
                 placed += 1
         print("GND drop vias: %d new, %d pads joined to an existing GND via, %d without room" % (placed, shared, failed))
 
-    def gnd_bottom_links(self, reach=12.0):
-        """Surface-mount GND pads on the bottom layer (programming pad): bottom track to GND copper."""
-        k = "Default"
-        w = CLASSES[k]["w"]
+    # ---- GND stitching
+    def gnd_links(self):
+        """Centres of everything that joins the two GND pours: GND vias and plated GND pads."""
+        pts = [(it.geo[0], it.geo[1]) for it, obj in self.routed.get("GND", []) if it.kind == "circle"]
         for it in self.pads.get("GND", []):
-            if it.pad.GetAttribute() != pcbnew.PAD_ATTRIB_SMD or it.layers != [1]:
+            if it.pad.GetAttribute() == pcbnew.PAD_ATTRIB_PTH:
+                x0, y0, x1, y1 = it.bbox()
+                pts.append(((x0 + x1) / 2, (y0 + y1) / 2))
+        return pts
+
+    def stitch_ok(self):
+        """Cells where a stitching via is clear of every other net on both layers, of GND pads, of the
+        USB-C shell and of the bodies of the top-side parts (the module excepted)."""
+        k = "Default"
+        vr = CLASSES[k]["via"] / 2
+        bad = self.maps.edge_v[k] | self.maps.noshell
+        for l in (0, 1):
+            bad |= self.maps.st[(l, k, "v")].other("GND") > 0
+            bad |= self.maps.dy[(l, k, "v")].other("GND") > 0
+        for it in self.pads.get("GND", []):
+            for flat in it.cells(vr + STITCH_PAD_GAP, [0]).values():
+                bad.ravel()[flat] = True
+        X, Y = np.meshgrid(XS, YS)
+        for fp in self.board.GetFootprints():
+            if fp.GetReference() == "U1":
                 continue
-            tblock, vblock = self.maps.hard("GND", k, dyn_hard=True)
-            vblock[:] = True                 # stay on the bottom layer
-            src = set(l * NC + c for l, c in self.allowed_cells(it, w))
-            for s_ in src:
-                tblock[1].ravel()[s_ % NC] = False
-            win = it.window(reach)
-            targets, _ = self.gnd_copper(1, win)
-            path = astar(src, targets, tblock, vblock, win) if targets else None
-            ref = it.pad.GetParentFootprint().GetReference()
-            if path:
-                self.emit("GND", path, k)
-                print("bottom GND link: %s.%s" % (ref, it.pad.GetNumber()))
-            else:
-                print("  no bottom GND link for %s.%s" % (ref, it.pad.GetNumber()))
+            side = pcbnew.F_CrtYd if fp.GetLayer() == pcbnew.F_Cu else pcbnew.B_CrtYd
+            bb = fp.GetCourtyard(side).BBox()
+            if bb.GetWidth() <= 0:
+                continue
+            x0, y0 = to_mm(bb.GetX()) - OX, to_mm(bb.GetY()) - OY
+            x1, y1 = x0 + to_mm(bb.GetWidth()), y0 + to_mm(bb.GetHeight())
+            bad |= (X >= x0 - vr) & (X <= x1 + vr) & (Y >= y0 - vr) & (Y <= y1 + vr)
+        return ~bad
+
+    def pour_mask(self, layer):
+        """Cells the GND pour of a layer can reach: clear of the copper of every other net."""
+        k = "Default"
+        return ~((self.maps.st[(layer, k, "t")].other("GND") > 0) |
+                 (self.maps.dy[(layer, k, "t")].other("GND") > 0) | self.maps.edge_t[k])
+
+    @staticmethod
+    def label(mask):
+        """4-connected regions of a boolean grid: (labels, count); label 0 = outside the mask."""
+        free = bytearray(mask.ravel().astype(np.uint8))
+        lab = [0] * NC
+        n = 0
+        for start in np.flatnonzero(mask.ravel()).tolist():
+            if lab[start]:
+                continue
+            n += 1
+            lab[start] = n
+            stack = [start]
+            while stack:
+                c = stack.pop()
+                i = c % NX
+                for nb in (c - NX, c + NX, c - 1 if i else -1, c + 1 if i < NX - 1 else -1):
+                    if 0 <= nb < NC and free[nb] and not lab[nb]:
+                        lab[nb] = n
+                        stack.append(nb)
+        return np.array(lab, np.int32).reshape(NY, NX), n
+
+    def gnd_stitch(self):
+        """Vias for the pieces of pour without a connection to the other layer, then a grid of vias."""
+        k = "Default"
+        X, Y = np.meshgrid(XS, YS)
+        repaired = 0
+        for _ in range(4):                   # a new via can leave a piece of the other layer unconnected
+            added = 0
+            for layer in (1, 0):
+                lab, n = self.label(self.pour_mask(layer))
+                area = np.bincount(lab.ravel(), minlength=n + 1) * G * G
+                linked = set()
+                for x, y in self.gnd_links():
+                    linked.add(int(lab[int(round(y / G)), int(round(x / G))]))
+                ok = self.stitch_ok()
+                for r in range(1, n + 1):
+                    if r in linked or area[r] < STITCH_MIN_AREA:
+                        continue
+                    sel = (lab == r) & ok
+                    if not sel.any():
+                        if not _:            # reported once
+                            print("  GND pour piece of %.1f mm2 on %s around (%.1f, %.1f) has no room for a via" %
+                                  (area[r], ("F.Cu", "B.Cu")[layer], X[lab == r].mean(), Y[lab == r].mean()))
+                        continue
+                    cx, cy = X[sel].mean(), Y[sel].mean()
+                    d = np.where(sel, np.hypot(X - cx, Y - cy), 1e9)
+                    j, i = np.unravel_index(np.argmin(d), d.shape)
+                    self.add_via("GND", (float(i) * G, float(j) * G), k)
+                    added += 1
+            repaired += added
+            if not added:
+                break
+        grid = 0
+        ok = self.stitch_ok()
+        links = self.gnd_links()
+        snap = int(round(0.75 / G))
+        row = 0
+        y = 1.0
+        while y < H - 0.5:
+            x = 1.0 + (STITCH_PITCH / 2 if row % 2 else 0.0)
+            while x < W - 0.5:
+                i0, j0 = int(round(x / G)), int(round(y / G))
+                a, b = max(0, i0 - snap), min(NX - 1, i0 + snap)
+                c, d_ = max(0, j0 - snap), min(NY - 1, j0 + snap)
+                sub = ok[c:d_ + 1, a:b + 1].copy()
+                if sub.any():
+                    SX, SY = X[c:d_ + 1, a:b + 1], Y[c:d_ + 1, a:b + 1]
+                    for lx, ly in links:
+                        sub &= np.hypot(SX - lx, SY - ly) >= STITCH_GAP
+                if sub.any():
+                    dist = np.where(sub, np.hypot(SX - x, SY - y), 1e9)
+                    j, i = np.unravel_index(np.argmin(dist), dist.shape)
+                    px, py = float(SX[j, i]), float(SY[j, i])
+                    self.add_via("GND", (px, py), k)
+                    links.append((px, py))
+                    grid += 1
+                x += STITCH_PITCH
+            y += STITCH_PITCH * 0.866
+            row += 1
+        print("GND stitching vias: %d for unconnected pieces of pour, %d on the %.1f mm grid" %
+              (repaired, grid, STITCH_PITCH))
 
 
 def main(path):
@@ -605,8 +723,8 @@ def main(path):
     if missing:
         raise SystemExit("nets not in ORDER: %s" % missing)
     failed = r.negotiate(ORDER)
-    r.gnd_drops()
-    r.gnd_bottom_links()
+    r.gnd_drops()                            # a pad left without a via shows up in the DRC afterwards
+    r.gnd_stitch()
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())
     pcbnew.SaveBoard(path, board)
     print("saved %s; unrouted nets: %s" % (path, failed or "none"))

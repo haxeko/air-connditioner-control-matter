@@ -14,7 +14,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import netdef  # noqa: E402
 from sexp import find, first, parse  # noqa: E402
 
-FPDIR = "/usr/share/kicad/footprints"
+from local_lib import FPDIR, LOCAL_LIB, PROJDIR  # noqa: E402  (project footprint library ac_ir_s3.pretty)
+
 OX, OY = 100.0, 100.0           # board origin on the page (mm)
 W, H = netdef.BOARD_W, netdef.BOARD_H
 CORNER = 1.0                    # outline corner radius
@@ -23,14 +24,17 @@ CORNER = 1.0                    # outline corner radius
 # The module antenna overhangs the top edge (y = 0 is the module's antenna boundary).
 PLACE = {
     "U1": (15.0, 6.75, 0),
-    # left strip: 3V3 decoupling, LDO, EN power-on reset RC
-    "C3": (1.3, 2.3, 90), "C4": (3.55, 2.3, 90),
-    "U2": (2.6, 6.9, 90),
-    "C2": (1.3, 11.3, 90), "C1": (3.55, 11.3, 90),
-    "R1": (1.3, 15.2, 90), "C5": (3.55, 15.2, 270),     # C5 GND pad faces the free area below
-    # right strip: BOOT button and IO0 pull-up
-    "R2": (27.0, 8.6, 90), "SW1": (27.4, 16.4, 90),
-    # programming pads on the bottom side, under the module: 3V3 TX RX GND IO0
+    # left strip: 3V3 decoupling (C3 is also the LDO output capacitor), LDO, its input capacitor right
+    # under the input pin, EN power-on reset RC. The parts keep to the left so that the signals of the
+    # module's left pins have a corridor on the top layer between the strip and the module pads.
+    "C3": (1.3, 2.3, 90), "C4": (3.4, 2.3, 90),
+    "U2": (2.3, 6.9, 90),
+    "C2": (1.3, 11.0, 270),
+    "R1": (1.3, 15.2, 90), "C5": (3.3, 15.2, 270),      # C5 GND pad faces the free area below
+    # right strip: BOOT button
+    "SW1": (27.4, 16.4, 90),
+    # programming pads on the bottom side, under the module: EN 3V3 TX RX GND IO0
+    "TP6": (7.38, 15.6, 0),
     "TP1": (9.92, 15.6, 0), "TP2": (12.46, 15.6, 0), "TP3": (15.0, 15.6, 0),
     "TP4": (17.54, 15.6, 0), "TP5": (20.08, 15.6, 0),
     # power inputs: USB-C (left edge, mouth facing left) and PH2.0 (right edge)
@@ -47,14 +51,15 @@ PLACE = {
     # bottom edge: IR LED (D3) - receiver (U4) - IR LED (D2), all facing down (+y)
     "D3": (6.62, 32.9, 0), "U4": (12.46, 36.4, 0), "D2": (20.83, 32.9, 0),
 }
-BOTTOM = {"TP1", "TP2", "TP3", "TP4", "TP5"}
+BOTTOM = {"TP1", "TP2", "TP3", "TP4", "TP5", "TP6"}
 
 SILK = [  # text, x, y, size, layer, justify
     ("BOOT", 27.4, 12.4, 0.8, "F.SilkS", "center"),
     ("5V", 26.4, 22.55, 0.8, "F.SilkS", "center"),       # above the PH2.0 5 V pin
     ("5V", 28.8, 25.7, 0.8, "B.SilkS", "center"),        # PH2.0 pins, bottom side
     ("GND", 28.8, 27.7, 0.8, "B.SilkS", "center"),
-    # bottom side: programming pad names and board name (under the module: no vias there)
+    # bottom side: programming pad names and board name
+    ("EN", 7.38, 13.9, 0.8, "B.SilkS", "center"),
     ("3V3", 9.92, 13.9, 0.8, "B.SilkS", "center"),
     ("TX", 12.46, 13.9, 0.8, "B.SilkS", "center"),
     ("RX", 15.0, 13.9, 0.8, "B.SilkS", "center"),
@@ -165,7 +170,8 @@ def build(netlist, out):
 
     for ref, c in sorted(comps.items()):
         lib, name = c["footprint"].split(":")
-        fp = pcbnew.FootprintLoad(os.path.join(FPDIR, lib + ".pretty"), name)
+        libdir = PROJDIR if lib == LOCAL_LIB else FPDIR
+        fp = pcbnew.FootprintLoad(os.path.join(libdir, lib + ".pretty"), name)
         if fp is None:
             raise SystemExit("footprint not found: " + c["footprint"])
         fp.SetFPID(pcbnew.LIB_ID(lib, name))
