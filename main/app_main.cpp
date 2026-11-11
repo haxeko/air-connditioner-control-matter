@@ -54,6 +54,35 @@ static_assert(TSTAT_MODE_OFF == CLIMATE_MODE_OFF && TSTAT_MODE_COOL == CLIMATE_M
 static_assert(CONFIG_APP_BUTTON_PAIRING_PRESS_COUNT != CONFIG_APP_BUTTON_PRESS_COUNT,
               "BOOT gestures for pairing mode and for the portal must differ");
 
+/*
+ * GPIO choices that cannot work on an ESP32-S3-WROOM-1-N16R8 are refused at build time (the Kconfig
+ * range 0..48 cannot express them): GPIO26-32 are the SPI flash, GPIO33-37 the octal PSRAM, GPIO43/44
+ * the UART0 console used for flashing and logs. The IR pins also stay off the strapping pins: the gate
+ * pull-down of the driver or the idle-high receiver output would change the boot mode (GPIO0, 46),
+ * the flash voltage (GPIO45) or the JTAG source (GPIO3).
+ */
+#if CONFIG_SPIRAM_MODE_OCT
+#define APP_GPIO_MEMORY_LAST 37
+#else
+#define APP_GPIO_MEMORY_LAST 32
+#endif
+#define APP_GPIO_USABLE(n) (!((n) >= 26 && (n) <= APP_GPIO_MEMORY_LAST) && (n) != 43 && (n) != 44)
+#define APP_GPIO_STRAPPING(n) ((n) == 0 || (n) == 3 || (n) == 45 || (n) == 46)
+static_assert(APP_GPIO_USABLE(CONFIG_APP_IR_TX_GPIO) && !APP_GPIO_STRAPPING(CONFIG_APP_IR_TX_GPIO),
+              "IR TX GPIO: not a flash/PSRAM, UART0 or strapping pin");
+static_assert(APP_GPIO_USABLE(CONFIG_APP_IR_RX_GPIO) && !APP_GPIO_STRAPPING(CONFIG_APP_IR_RX_GPIO),
+              "IR RX GPIO: not a flash/PSRAM, UART0 or strapping pin");
+static_assert(APP_GPIO_USABLE(CONFIG_APP_BOOT_BUTTON_GPIO), "BOOT button GPIO: not a flash/PSRAM or UART0 pin");
+static_assert(CONFIG_APP_IR_TX_GPIO != CONFIG_APP_IR_RX_GPIO && CONFIG_APP_IR_TX_GPIO != CONFIG_APP_BOOT_BUTTON_GPIO &&
+                  CONFIG_APP_IR_RX_GPIO != CONFIG_APP_BOOT_BUTTON_GPIO,
+              "IR TX, IR RX and the BOOT button need three different GPIOs");
+#ifndef CONFIG_APP_STATUS_LED_NONE
+static_assert(APP_GPIO_USABLE(CONFIG_APP_STATUS_LED_GPIO), "status LED GPIO: not a flash/PSRAM or UART0 pin");
+static_assert(CONFIG_APP_STATUS_LED_GPIO != CONFIG_APP_IR_TX_GPIO && CONFIG_APP_STATUS_LED_GPIO != CONFIG_APP_IR_RX_GPIO &&
+                  CONFIG_APP_STATUS_LED_GPIO != CONFIG_APP_BOOT_BUTTON_GPIO,
+              "the status LED needs its own GPIO");
+#endif
+
 /* CHIP thread: only posts to the climate task queue. */
 /* Fan speed / Auto / swing chosen in a home app (CHIP thread, non blocking). */
 static void on_matter_fan(uint8_t fan, uint8_t swing)
@@ -241,6 +270,15 @@ static void on_matter_ui(matter_ui_event_t ev)
     case MATTER_UI_COMMISSIONED:
         status_led_event(STATUS_LED_EVENT_PAIRED);
         break;
+    case MATTER_UI_IDENTIFY_START:
+        status_led_set(STATUS_LED_IDENTIFY, true);
+        break;
+    case MATTER_UI_IDENTIFY_STOP:
+        status_led_set(STATUS_LED_IDENTIFY, false);
+        break;
+    case MATTER_UI_IDENTIFY_EFFECT:
+        status_led_event(STATUS_LED_EVENT_IDENTIFY);
+        break;
     }
 }
 
@@ -270,6 +308,7 @@ extern "C" void app_factory_reset(void)
 extern "C" void app_main(void)
 {
     app_state_init();
+    app_crash_init(); /* report of a panic / watchdog reset before this start, shown on the diagnostics page */
     ESP_ERROR_CHECK(config_store_init());
     if (config_store_was_factory_reset())
     {
@@ -331,7 +370,8 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(remote_temperature_init(&cfg, on_temperature));
     non_fatal("remote temperature", remote_temperature_start());
 
-    ESP_ERROR_CHECK(wifi_config_start(on_portal));
+    /* Without the portal the thermostat, the IR side and the console still work. */
+    non_fatal("configuration portal", wifi_config_start(on_portal));
     non_fatal("BOOT button", button_handler_start(on_boot_sequence, on_boot_hold));
     app_console_start();
     confirm_firmware_later();

@@ -88,6 +88,13 @@ void climate_control_profile_changed(void);
 /** Transmit the current desired state again even if unchanged ("gửi lại"). */
 esp_err_t climate_control_force_resend(void);
 
+/**
+ * Before a planned restart: transmit a change that is still waiting for its send delay and store the
+ * state that is normally written a few seconds later, so that the restarted firmware knows what the AC
+ * is doing. Blocks up to 2 x timeout_ms. Not from the CHIP task, not from the climate callbacks.
+ */
+void climate_control_flush(uint32_t timeout_ms);
+
 void climate_control_get_status(climate_status_t *out);
 
 #ifdef __cplusplus

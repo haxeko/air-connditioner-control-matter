@@ -4,7 +4,7 @@ Firmware ESP-IDF thuần (không Arduino, không ESPHome, không Home Assistant/
 ESP32-S3 N16R8:
 
 - xuất hiện trong Google Home, Apple Home, SmartThings, Alexa, Aqara Home, Home Assistant… dưới dạng
-  **máy lạnh / Matter Thermostat** tên **`May lanh IR v1.5.0`** (Tắt/Làm lạnh, Sưởi/Khô/Quạt khi profile máy
+  **máy lạnh / Matter Thermostat** tên **`May lanh IR v1.6.0`** (Tắt/Làm lạnh, Sưởi/Khô/Quạt khi profile máy
   lạnh có các chế độ đó; tốc độ quạt và đảo gió qua cluster Fan Control);
 - tự tạo **fabric riêng (Fabric B)** để ghép cảm biến nhiệt độ Matter đã có trong nhà bằng Multi-Admin,
   rồi **subscribe** trực tiếp nhiệt độ của cảm biến (kể cả cảm biến Thread qua Border Router sẵn có);
@@ -21,9 +21,50 @@ ESP32-S3 N16R8:
   đặt lại gốc; cả hai cũng làm được trên web;
 - **cập nhật firmware ngay trên trang web** (tải file `.bin`), không cần dây nạp; firmware mới lỗi thì tự quay
   về bản cũ;
+- **tự phục hồi và tự báo lỗi**: treo thì watchdog khởi động lại; lỗi nghiêm trọng để lại báo cáo (tác vụ, vị trí)
+  đọc được trên trang Chẩn đoán;
 - lưu mọi cấu hình vào flash: mất điện không phải thiết lập lại;
-- mọi tên thiết bị phát ra đều có **hậu tố phiên bản firmware** (`v1.5.0`): tên Matter, tên Bluetooth
-  `AC-XXXX-v1.5.0`, Wi-Fi cấu hình `AC-Matter-XXXX-v1.5.0` – nhìn tên là biết thiết bị đang chạy bản nào.
+- mọi tên thiết bị phát ra đều có **hậu tố phiên bản firmware** (`v1.6.0`): tên Matter, tên Bluetooth
+  `AC-XXXX-v1.6.0`, Wi-Fi cấu hình `AC-Matter-XXXX-v1.6.0` – nhìn tên là biết thiết bị đang chạy bản nào.
+
+### Có gì mới trong v1.6.0
+
+Bản rà soát và tối ưu (firmware và [mạch in v1.4](hardware/ac-ir-s3/README.md)). Cách điều khiển máy lạnh không
+đổi; thiết bị tự phục hồi tốt hơn và nói được vì sao nó khởi động lại.
+
+Độ tin cậy và chẩn đoán:
+
+- **Treo thì tự khởi động lại**: một tác vụ chiếm CPU quá 15 giây làm thiết bị panic và khởi động lại (trước đây
+  watchdog chỉ in cảnh báo ra cổng serial, thiết bị vẫn treo).
+- **Báo cáo sự cố**: khi firmware lỗi nghiêm trọng (exception, abort, watchdog), thiết bị lưu core dump vào phân
+  vùng `coredump` trước khi khởi động lại. Tab **Chẩn đoán → Sự cố khởi động lại** (và lệnh console `diag`) hiện
+  tác vụ gây lỗi, vị trí và chuỗi địa chỉ gọi hàm – chỉ là địa chỉ trong chương trình, không có nội dung bộ nhớ.
+  `python tools/decode_backtrace.py <địa chỉ…>` đổi các địa chỉ đó thành tên hàm bằng file
+  `ac_matter_ir_v1.6.0_symbols.txt.gz` (không cần ESP-IDF). Phân vùng này chỉ có trên bo nạp file `full` từ
+  v1.6.0, hoặc nạp thêm file bảng phân vùng (xem [firmware/README.md](firmware/README.md)); bo chỉ cập nhật file
+  app thì chạy bình thường, chỉ là không lưu báo cáo.
+- **Ngăn xếp của từng tác vụ** (số byte còn trống ít nhất từ lúc khởi động) trên trang Chẩn đoán và lệnh `diag`:
+  thấy ngay tác vụ nào sát giới hạn khi chạy trên bo thật.
+- **Identify**: ứng dụng nhà bấm “nhận diện thiết bị” thì LED nháy **trắng**.
+
+Sửa lỗi (các mục còn lại của lần rà soát trước):
+
+- Phát IR bị quá hạn: kênh phát được dừng trước khi bộ đệm lệnh bị giải phóng (trước đây ngắt phát có thể còn đọc
+  vùng nhớ đã trả lại).
+- Vừa phát một lệnh, người dùng bấm remote gốc đổi trạng thái, rồi ứng dụng nhà lại yêu cầu đúng lệnh vừa phát
+  (trong 1,5 giây): lệnh không còn bị coi là trùng và bỏ qua.
+- Khởi động lại từ trang web (kể cả sau khi cập nhật firmware): lệnh IR đang chờ được phát nốt và trạng thái máy
+  lạnh được lưu trước khi khởi động lại (trước đây có thể mất thay đổi của 10 giây cuối).
+- Thuộc tính `ControlSequenceOfOperation` không còn ghi được sang kiểu mà máy lạnh không có (ví dụ “có sưởi” với
+  profile chỉ làm lạnh); giá trị cũ sai được sửa lúc khởi động.
+- Cổng cấu hình khởi tạo lỗi không còn làm thiết bị khởi động lại liên tục: thermostat và IR vẫn chạy.
+
+Cấu hình:
+
+- Tắt hẳn bộ mã ghép thử nghiệm của SDK (`CONFIG_ENABLE_TEST_SETUP_PARAMS=n`): không còn đường nào quay về
+  passcode `20202021` (thiết bị vốn dùng mã riêng từng máy).
+- Chọn GPIO không dùng được trên N16R8 (flash/PSRAM 26–37, UART0 43/44, chân strapping cho ngõ ra IR, hai chức
+  năng trùng chân) bị từ chối **lúc build** thay vì hỏng lúc chạy.
 
 ### Có gì mới trong v1.5.0
 
@@ -270,8 +311,9 @@ Mốc 1 (build khung server + commissioner) là commit `bd72683`; log khởi đ�
 
 ## 4. Phần cứng và đấu nối
 
-Bo tham chiếu: ESP32-S3 N16R8 (flash 16 MB QIO, PSRAM 8 MB octal). **Không dùng GPIO33–37** (PSRAM
-octal), tránh chân strapping GPIO0/3/45/46 cho ngoại vi khác.
+Bo tham chiếu: ESP32-S3 N16R8 (flash 16 MB QIO, PSRAM 8 MB octal). **Không dùng GPIO26–37** (flash và PSRAM
+octal) và GPIO43/44 (UART0), tránh chân strapping GPIO0/3/45/46 cho ngoại vi khác; cấu hình sai các chân này bị
+từ chối lúc build (`static_assert` trong `main/app_main.cpp`).
 
 | Chức năng | Chân mặc định | Ghi chú |
 |---|---|---|
@@ -279,7 +321,7 @@ octal), tránh chân strapping GPIO0/3/45/46 cho ngoại vi khác.
 | Đầu thu IR 38 kHz (TSOP38238, VS1838B…) | **GPIO5** | Ngõ ra tích cực mức thấp (mặc định); pull-up nội đã bật |
 | Nút BOOT | **GPIO0** | Có sẵn trên bo, tích cực mức thấp |
 | Cảm biến cục bộ SHT4x/SHT3x (tùy chọn) | SDA **GPIO8**, SCL **GPIO9** | Địa chỉ 0x44, chỉ dùng làm dự phòng |
-| LED trạng thái | **GPIO48**, LED RGB WS2812 có sẵn trên bo | Nháy **xanh dương**: chế độ ghép Matter; xanh lá liên tục: Wi-Fi cấu hình đang mở; xanh lá 2 s: đã thêm vào ứng dụng nhà; 3 lần nháy đỏ: thao tác bị từ chối (chưa có Wi-Fi nhà). DevKitC-1 v1.1: GPIO38. Có thể chọn LED thường hoặc không dùng (Kconfig) |
+| LED trạng thái | **GPIO48**, LED RGB WS2812 có sẵn trên bo | Nháy **xanh dương**: chế độ ghép Matter; xanh lá liên tục: Wi-Fi cấu hình đang mở; xanh lá 2 s: đã thêm vào ứng dụng nhà; nháy **trắng**: ứng dụng nhà đang nhận diện thiết bị (Identify); 3 lần nháy đỏ: thao tác bị từ chối (chưa có Wi-Fi nhà). DevKitC-1 v1.1: GPIO38. Có thể chọn LED thường hoặc không dùng (Kconfig) |
 
 Mạch phát IR (dòng xung LED lớn hơn khả năng của GPIO, phải qua transistor):
 
@@ -303,9 +345,10 @@ Mạch phát IR (dòng xung LED lớn hơn khả năng của GPIO, phải qua tr
 
 **Mạch in riêng:** [`hardware/ac-ir-s3/`](hardware/ac-ir-s3/README.md) là bo KiCad 9 hai lớp 30 × 39 mm dùng
 ESP32-S3-WROOM-1-N16R8: nguồn 5 V qua USB-C (chỉ cấp nguồn) hoặc đầu PH2.0, có sẵn 2 LED IR + MOSFET, mắt thu, LED
-RGB WS2812B-2020, nút BOOT và 5 pad nạp UART ở mặt dưới (3V3, TX, RX, GND, IO0; nạp bằng bộ chuyển USB-UART 3,3 V), đúng các
+RGB WS2812B-2020, nút BOOT và 6 pad nạp UART ở mặt dưới (EN, 3V3, TX, RX, GND, IO0; nạp bằng bộ chuyển USB-UART 3,3 V), đúng các
 chân mặc định ở bảng trên (không phải đổi cấu hình firmware). Kèm Gerber, BOM, file tọa độ linh kiện và hướng dẫn
-lắp ráp, nạp.
+lắp ráp, nạp. Bản **v1.4** đã rà soát lại: lỗ via nhỏ nhất 0,3 mm, mặt GND hai lớp được khâu bằng via (cả dưới
+module), bớt hai linh kiện thừa.
 
 ---
 
@@ -344,10 +387,10 @@ idf.py build
 Lần build đầu, component manager tải `esp_matter 1.6.1` và các phụ thuộc đúng như `dependencies.lock`
 (cần Internet; các lần sau không cần). Build toàn bộ connectedhomeip mất khá lâu (10–30 phút).
 
-Đóng gói file `.bin` dựng sẵn (tên có hậu tố phiên bản: `ac_matter_ir_v1.5.0_app_0x40000.bin` để nâng cấp/tải
+Đóng gói file `.bin` dựng sẵn (tên có hậu tố phiên bản: `ac_matter_ir_v1.6.0_app_0x40000.bin` để nâng cấp/tải
 lên web, `…_full_0x0.bin` cho bo trắng, `…_bootloader_0x0.bin`) vào `firmware/`: `python tools/package_firmware.py`.
 
-Nâng cấp thư mục đã build bản cũ (v1.0.0 không có Bluetooth; trước v1.5.0 bootloader chưa bật rollback): xóa
+Nâng cấp thư mục đã build bản cũ (v1.0.0 không có Bluetooth; trước v1.6.0 bootloader chưa bật rollback): xóa
 `sdkconfig` để áp dụng `sdkconfig.defaults` mới, rồi build lại (`idf.py set-target esp32s3` cũng tạo lại
 `sdkconfig`):
 
@@ -395,7 +438,7 @@ Playwright): `node test/web/ui_test.js http://127.0.0.1:8080/`.
 
 ### Bước 1 – Wi-Fi cấu hình và mật khẩu
 
-Mỗi thiết bị phát Wi-Fi cấu hình có SSID riêng `AC-Matter-XXXX-v1.5.0` (4 ký tự cuối MAC + phiên bản
+Mỗi thiết bị phát Wi-Fi cấu hình có SSID riêng `AC-Matter-XXXX-v1.6.0` (4 ký tự cuối MAC + phiên bản
 firmware). Mật khẩu mặc định
 (cố định, đặt bằng `CONFIG_APP_AP_PASSWORD` trong `sdkconfig.defaults`) là:
 
@@ -420,7 +463,7 @@ dùng và mã ghép Matter (kèm QR vẽ bằng ký tự). Các lệnh khác: `s
 
 1. Lần đầu (chưa có Wi-Fi) thiết bị tự phát Wi-Fi cấu hình. Các lần sau: **nhấn BOOT 3 lần nhanh** (trong
    1,5 s). 1–2 lần nhấn không làm gì; nhấn khi đang mở chỉ gia hạn thời gian.
-2. Điện thoại kết nối `AC-Matter-XXXX-v1.5.0`. Nếu điện thoại báo “không có Internet”, chọn **giữ kết nối**.
+2. Điện thoại kết nối `AC-Matter-XXXX-v1.6.0`. Nếu điện thoại báo “không có Internet”, chọn **giữ kết nối**.
 3. Mở `http://192.168.4.1` → tab **Wi-Fi** → *Quét mạng* → chọn mạng 2,4 GHz → nhập mật khẩu → **Lưu**.
 4. Chờ “Đã kết nối mạng mới”. Nếu sai mật khẩu, sau 40 s thiết bị tự quay lại mạng cũ (nếu có).
 
@@ -433,15 +476,15 @@ biến không bị gián đoạn.
    để in tem dán lên thiết bị), hoặc lệnh `secrets` trên cổng serial. Mã là cố định cho từng thiết bị (tạo
    ngẫu nhiên ở lần khởi động đầu, lưu NVS).
 2. Bật **chế độ ghép**: **nhấn nút BOOT 2 lần** (trong 1,5 s) → LED **nháy xanh dương** trong suốt thời gian
-   cho phép ghép (15 phút). Trong thời gian này ESP **phát Bluetooth** (tên `AC-XXXX-v1.5.0`) và, nếu đã vào
-   Wi-Fi nhà, quảng bá DNS-SD `_matterc._udp` (tên `May lanh IR v1.5.0`). ESP chưa có Wi-Fi vẫn ghép được qua
+   cho phép ghép (15 phút). Trong thời gian này ESP **phát Bluetooth** (tên `AC-XXXX-v1.6.0`) và, nếu đã vào
+   Wi-Fi nhà, quảng bá DNS-SD `_matterc._udp` (tên `May lanh IR v1.6.0`). ESP chưa có Wi-Fi vẫn ghép được qua
    Bluetooth. Khi thiết bị chưa thuộc hệ sinh thái nào, chế độ ghép tự bật 15 phút sau mỗi lần khởi động. Cũng
    có thể bật bằng nút *Mở cửa sổ ghép* trên web hoặc lệnh `pairing`.
 3. Trên điện thoại: **bật Bluetooth**, kết nối **Wi-Fi nhà 2,4 GHz** (ESP32 không dùng được 5 GHz; **không**
    kết nối Wi-Fi cấu hình `AC-Matter-…` khi ghép), đứng gần thiết bị. Trong Google Home / Apple Home /
    SmartThings / Alexa / Home Assistant: *Thêm thiết bị → Matter*, quét QR hoặc nhập mã số. Ứng dụng gửi
    Wi-Fi nhà qua Bluetooth, ESP vào mạng và ứng dụng hoàn tất qua Wi-Fi. Ghép xong, LED sáng xanh lá 2 s rồi
-   tắt; thiết bị hiện tên `May lanh IR v1.5.0` (đổi tên trong ứng dụng thì tên mới được giữ).
+   tắt; thiết bị hiện tên `May lanh IR v1.6.0` (đổi tên trong ứng dụng thì tên mới được giữ).
 4. Firmware dùng **chứng thư thiết bị thử nghiệm của SDK** (VID 0xFFF1): ứng dụng sẽ cảnh báo “thiết bị
    chưa được chứng nhận” – chọn vẫn thêm. Một số ứng dụng cần bật chế độ nhà phát triển/thiết bị thử nghiệm.
 5. Muốn thêm vào hệ sinh thái thứ hai: dùng chức năng chia sẻ (Multi-Admin) của hệ sinh thái thứ nhất, hoặc
@@ -529,7 +572,7 @@ học IR, thử Wi-Fi mới hoặc đang cập nhật firmware).
    profile IR và cài đặt đều được giữ.
 4. Firmware mới chạy thử 60 giây. Nếu thiết bị khởi động lại trong thời gian đó (firmware lỗi), nó tự quay về
    bản cũ. Tính năng quay về cần bootloader từ v1.5.0: bo nạp lần đầu bằng bản cũ hơn vẫn cập nhật qua web được
-   nhưng không tự quay về, cho tới khi nạp file `ac_matter_ir_v1.5.0_bootloader_0x0.bin` qua UART một lần (không
+   nhưng không tự quay về, cho tới khi nạp file `ac_matter_ir_v1.6.0_bootloader_0x0.bin` qua UART một lần (không
    mất dữ liệu, lệnh trong [`firmware/README.md`](firmware/README.md)).
 
 ### Rời khỏi ứng dụng nhà, đặt lại gốc
@@ -698,6 +741,25 @@ Theo dõi remote gốc (từ v1.4.0):
   động lại không lấy mẫu lại chân strapping, nên vẫn giữ nút lúc thiết bị tự khởi động lại cũng không vào chế độ
   nạp.
 
+### 7.6 Watchdog, báo cáo sự cố và chẩn đoán
+
+- **Watchdog tác vụ** (`CONFIG_ESP_TASK_WDT_PANIC`, 15 s) theo dõi tác vụ idle của hai nhân: tác vụ nào không
+  nhường CPU quá 15 giây thì thiết bị panic và khởi động lại. Watchdog ngắt (300 ms) vẫn như trước. Thao tác dài
+  nhất của firmware (xóa NVS khi đặt lại gốc, kiểm tra SHA-256 của ảnh sau khi tải) ước tính 1–2 giây và có
+  nhường CPU; chưa đo trên bo.
+- **Core dump** (`CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH`, ELF, CRC32): trình xử lý panic ghi ngăn xếp và thanh ghi
+  của các tác vụ vào phân vùng `coredump` (256 KB) bằng ngăn xếp riêng 1,8 KB. `app_crash_init()` đọc **tóm tắt**
+  một lần lúc khởi động: tên tác vụ, PC, nguyên nhân, tối đa 16 địa chỉ trả về, đầu SHA-256 của ELF. Trang web và
+  lệnh `diag` chỉ hiện tóm tắt này; nội dung ngăn xếp không được đưa ra ở đâu (nó nằm trên flash không mã hóa,
+  cùng chỗ với NVS). Báo cáo còn đó cho tới khi bấm *Xóa báo cáo* (`diag clear`) hoặc có sự cố mới.
+- **Giải mã**: `tools/package_firmware.py` xuất bảng hàm của bản build (`…_symbols.txt.gz`, dòng đầu là SHA-256
+  của ELF); `tools/decode_backtrace.py --elf-sha <đầu SHA trong báo cáo> <địa chỉ…>` tra tên hàm và báo nếu báo
+  cáo thuộc bản build khác.
+- **Ngăn xếp tác vụ** (`CONFIG_FREERTOS_USE_TRACE_FACILITY`, `uxTaskGetSystemState`): số byte còn trống ít nhất
+  của mọi tác vụ, sắp từ thấp lên; dưới 512 byte được đánh dấu.
+- **Trước khi khởi động lại có chủ đích** (web, sau cập nhật): `climate_control_flush()` phát lệnh đang chờ, đợi
+  bộ phát xong và ghi trạng thái (bình thường ghi trễ 10 giây để đỡ mòn flash).
+
 ---
 
 ## 8. Bảo mật
@@ -714,6 +776,10 @@ Theo dõi remote gốc (từ v1.4.0):
 - CSP chặt (`script-src 'self'`, không inline script), `X-Frame-Options: DENY`, không cache.
 - Không log mật khẩu Wi-Fi, mật khẩu AP, mã chia sẻ, passcode hay khóa riêng; mã ghép chỉ hiện theo yêu cầu
   trên web hoặc lệnh console `secrets`. Bộ đệm chứa mật khẩu/mã được xóa sau khi dùng.
+- Báo cáo sự cố chỉ hiện tên tác vụ và địa chỉ chương trình. Core dump đầy đủ (có ngăn xếp các tác vụ, có thể
+  chứa dữ liệu đang xử lý lúc lỗi) nằm trong flash của thiết bị, không được gửi đi đâu và không đọc được qua web;
+  ai tháo được flash thì vốn đã đọc được NVS (flash chưa mã hóa, xem giới hạn).
+- Không còn giá trị ghép nối thử nghiệm của SDK trong firmware (`CONFIG_ENABLE_TEST_SETUP_PARAMS=n`).
 - Bluetooth chỉ phát khi cửa sổ ghép đang mở (BOOT x2, web, hoặc khi chưa thuộc hệ sinh thái nào) và chỉ
   có dịch vụ CHIPoBLE của Matter: muốn ghép phải có passcode trong QR/mã số (PASE), giống ghép qua mạng.
 - Cập nhật firmware, gỡ hệ sinh thái và đặt lại gốc trên web đi qua đúng các kiểm tra trên (chỉ người đã vào
@@ -729,12 +795,16 @@ Theo dõi remote gốc (từ v1.4.0):
 
 ### 9.1 Đã build
 
-- Toàn bộ firmware v1.5.0 build sạch cho `esp32s3` với IDF v6.0.2 + esp_matter 1.6.1 + IRremoteESP8266
+- Toàn bộ firmware v1.6.0 build sạch cho `esp32s3` với IDF v6.0.2 + esp_matter 1.6.1 + IRremoteESP8266
   2.9.0 (cờ cảnh báo mặc định của IDF, cảnh báo bị coi là lỗi với mã của dự án), có Bluetooth (NimBLE +
-  CHIPoBLE): ảnh 2,09 MB (khe OTA 4 MB, còn trống 50 %), DIRAM tĩnh 46,1 %, bootloader 22,6 KB (bật app rollback). Thư viện IR dùng tối đa khoảng
+  CHIPoBLE): ảnh 2,11 MB (khe OTA 4 MB, còn trống 50 %), DIRAM tĩnh 47,6 %, bootloader 22,6 KB (bật app rollback);
+  watchdog có panic, core dump và bảng tác vụ thêm khoảng 20 KB flash và 5 KB RAM so với v1.5.0. Thư viện IR dùng tối đa khoảng
   2,5 KB stack khi tạo lệnh và khoảng 1 KB khi giải mã lệnh remote (đo bằng `-fstack-usage` với trình biên dịch
   Xtensa); task điều khiển có 8 KB.
 - Mốc 1: server + commissioner Fabric B trên cùng CHIP stack build và link thành công.
+- Đối chiếu sau khi đóng gói: SHA-256 của ELF ghi trong ảnh trùng với dòng đầu file symbols; `decode_backtrace.py`
+  tra đúng tên hàm từ địa chỉ thật của bản build (kể cả địa chỉ trả về có 2 bit cửa sổ); file `full` chứa đúng
+  bootloader, bảng phân vùng (có `coredump`) và app đã đóng gói riêng.
 
 ### 9.2 Đã thử (không cần phần cứng)
 
@@ -753,6 +823,8 @@ Theo dõi remote gốc (từ v1.4.0):
 | Đồng bộ remote gốc: chuỗi bấm remote Sharp (Lạnh 24 → 26 °C, quạt 2/3, 16 °C bị cắt về 18 °C, Sưởi, Khô, Tắt) qua mô phỏng mắt thu đọc lại đúng trạng thái; 5 mức quạt Daikin đọc lại đúng; ánh xạ sang thermostat (Tắt, Lạnh, Khô giữ nhiệt độ đặt, Quạt, Sưởi/Auto không có, cắt giới hạn, không đảo gió); sau khi bấm remote thuật toán đòi đúng trạng thái remote (không phát lại) cả ở chế độ cảm biến ngoài | `test_irlib.cpp` (`irlib_remote`), `test_climate.c` | Đạt |
 | Giao diện: dòng “Remote gốc” (trạng thái + lệnh bị bỏ qua), tùy chọn đồng bộ bật mặc định, tắt thì hiện “không theo dõi” | `test/web/ui_test.js` | Đạt |
 | Giao diện v1.5.0: gỡ một hệ sinh thái, rời tất cả; cập nhật firmware (không chọn file, file full, file của dự án khác đều bị từ chối và trang dùng tiếp được; file đúng → báo phiên bản mới và tên Wi-Fi mới); đặt lại gốc khi đang ghép cảm biến (hỏi xác nhận lần hai) | `test/web/ui_test.js` | Đạt |
+| Giao diện v1.6.0: báo cáo sự cố (tác vụ, nguyên nhân, backtrace, “bản khác”), xóa báo cáo, ngăn xếp tác vụ thấp được đánh dấu | `test/web/ui_test.js` | Đạt |
+| Giải mã địa chỉ: tra đúng hàm chứa địa chỉ, địa chỉ trả về có 2 bit cửa sổ, địa chỉ ngoài chương trình, cảnh báo khác bản build | `tools/decode_backtrace.py` với file symbols của bản build | Đạt (xem 9.1) |
 
 ### 9.3 Cần phần cứng để xác nhận
 
@@ -768,6 +840,8 @@ Theo dõi remote gốc (từ v1.4.0):
 | 6b. Bấm remote gốc (Sharp…) → ứng dụng nhà đổi theo, ESP không phát lại | Logic + giải mã đã thử trên máy tính; cần remote + mạch IR + hub |
 | 8. Cập nhật firmware qua web, chạy thử 60 s, tự quay về khi firmware mới reset sớm | Đã build; kiểm tra ảnh và giao diện đã thử với máy chủ giả lập; ghi flash/khởi động lại/rollback cần bo |
 | 9. Giữ BOOT 10 s / 20 s, gỡ hệ sinh thái trên web, đặt lại gốc (xóa `nvs`, giữ mã ghép và profile IR) | Logic nút và giao diện đã thử; xóa fabric và xóa NVS cần bo + hub |
+| 10. Watchdog 15 s không báo nhầm khi dùng bình thường (ghép, học IR, cập nhật, đặt lại gốc); báo cáo sự cố được lưu và đọc lại; ngăn xếp các tác vụ còn dư | Đã build; cần bo (xem bước 17) |
+| 11. Identify từ ứng dụng nhà → LED nháy trắng | Đã build; cần hub |
 | 7. Thuật toán trên phòng thật; mất cảm biến không phát lệnh sai | Logic đã thử; cần phần cứng |
 | AP+STA không làm mất đường mạng tới cảm biến | Thiết kế giữ STA; cần đo thực tế |
 | Cảm biến vẫn hoạt động ở hệ sinh thái cũ | Chỉ thêm fabric; cần xác nhận với hub |
@@ -780,16 +854,16 @@ bị tắt – khi đó không còn đường IPv6 tới mạng Thread.
 
 Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng thái.
 
-1. **Khởi động hai vai trò** – log có `App "ac_matter_ir" version: 1.5.0`, `room AC/thermostat endpoint 1 … fan control: N speed(s)`,
-   `device name: May lanh IR v1.5.0 (vendor DIY), firmware 1.5.0, BLE commissioning on`,
-   `BLE name: AC-XXXX-v1.5.0` và `commissioner ready: fabric index …, fabric 0x…, node 0x… (created)`; lần
+1. **Khởi động hai vai trò** – log có `App "ac_matter_ir" version: 1.6.0`, `room AC/thermostat endpoint 1 … fan control: N speed(s)`,
+   `device name: May lanh IR v1.6.0 (vendor DIY), firmware 1.6.0, BLE commissioning on`,
+   `BLE name: AC-XXXX-v1.6.0` và `commissioner ready: fabric index …, fabric 0x…, node 0x… (created)`; lần
    khởi động sau là `(restored)` với cùng fabric ID (không tạo fabric mới).
 1b. **Tìm thấy qua Bluetooth** – nhấn BOOT 2 lần; ứng dụng nRF Connect (hoặc ứng dụng nhà) thấy thiết bị
-   `AC-XXXX-v1.5.0` với dịch vụ `0xFFF6`. Thêm vào ứng dụng nhà bằng QR khi ESP **chưa** có Wi-Fi: ứng dụng
+   `AC-XXXX-v1.6.0` với dịch vụ `0xFFF6`. Thêm vào ứng dụng nhà bằng QR khi ESP **chưa** có Wi-Fi: ứng dụng
    gửi Wi-Fi, log `Disconnecting WiFi station interface`/`IP_EVENT_STA_GOT_IP` rồi `added to a home ecosystem`.
 2. **BOOT** – nhấn 1 lần: không có gì. Nhấn 2 lần: sau ~1,5 s log `BOOT x2: Matter pairing mode`,
    `pairing mode: commissioning window opened` và `CHIPoBLE advertising started`, LED nháy xanh dương; hết 15
-   phút hoặc ghép xong thì LED tắt. Nhấn 3 lần trong 1,5 s: log `portal open: SSID AC-Matter-XXXX-v1.5.0`,
+   phút hoặc ghép xong thì LED tắt. Nhấn 3 lần trong 1,5 s: log `portal open: SSID AC-Matter-XXXX-v1.6.0`,
    LED xanh lá. Nhấn 3 lần lần nữa:
    `portal already open: lifetime extended`. Giữ nút dưới 10 giây: không có gì xảy ra.
 3. **Ghép cảm biến** – theo bước 5; trang Cảm biến hiển thị endpoint và giá trị đọc thử; sau khi Lưu, trạng
@@ -827,6 +901,10 @@ Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng
 16. **Đặt lại gốc** – giữ BOOT 20 s: LED đỏ sáng liên tục, thiết bị khởi động lại, log `factory reset done (pairing
     code and IR profiles kept)`, Wi-Fi cấu hình tự mở với mật khẩu mặc định, mã QR/mã số **không đổi**, profile IR
     còn, không còn Wi-Fi nhà/hệ sinh thái/cảm biến.
+17. **Chẩn đoán** – sau vài giờ dùng bình thường (đã ghép, đã phát IR, đã mở cổng cấu hình): tab Chẩn đoán →
+    *Ngăn xếp của các tác vụ* (hoặc lệnh `diag`): không dòng nào dưới 512 byte; *Lý do khởi động* là “Cấp nguồn”
+    hoặc “Khởi động lại bằng phần mềm”, không phải Watchdog/Sụt áp. Nếu là **Sụt áp nguồn (brownout)**: nguồn 5 V
+    hoặc dây cấp yếu. Nếu có *Sự cố khởi động lại*: chép các dòng đó và chạy `tools/decode_backtrace.py`.
 
 ---
 
@@ -853,6 +931,11 @@ Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng
   toàn vẹn nội dung. Tự quay về bản cũ chỉ có với bootloader từ v1.5.0 (file `full` hoặc file bootloader v1.5.0);
   quay về chỉ bắt được firmware làm thiết bị reset trong 60 giây đầu, không bắt được lỗi chức năng. Chưa có
   Matter OTA (cập nhật qua ứng dụng nhà).
+- **Báo cáo sự cố** cần phân vùng `coredump` (file `full` hoặc file bảng phân vùng từ v1.6.0). Địa chỉ trong báo
+  cáo chỉ giải mã được bằng file symbols của đúng bản build đã lỗi. Watchdog và core dump chưa được thử trên bo.
+- Chứng thư vận hành (NOC) của Fabric B được cấp lại ở mỗi lần khởi động (ghi NVS mỗi lần bật nguồn); chưa đổi
+  vì cần thử với cảm biến thật.
+- Flash chưa mã hóa và chưa bật secure boot: ai tháo được chip nhớ thì đọc được Wi-Fi và khóa Matter.
 - **Đặt lại gốc** không tự gỡ fabric của ESP khỏi cảm biến đang ghép (cần cảm biến trực tuyến; hãy gỡ cảm biến
   trước). Gỡ hệ sinh thái trên thiết bị không xóa được thiết bị khỏi ứng dụng nhà tương ứng.
 - Đồng bộ từ remote gốc là một chiều “nghe được gì thì hiển thị nấy”: ESP chỉ biết lệnh khi mắt thu nhìn thấy
@@ -880,7 +963,7 @@ Mở `idf.py monitor` trong suốt quá trình; lệnh `status` in nhanh trạng
 
 **Phiên bản firmware** chỉ đặt một chỗ: `set(PROJECT_VER "1.5.0")` trong `CMakeLists.txt` gốc. Từ đó sinh
 ra phiên bản ứng dụng ESP-IDF, `SoftwareVersionString` Matter, `SoftwareVersion` = MAJOR·10000 + MINOR·100 +
-PATCH (10500) và hậu tố `v1.5.0` của mọi tên (macro `APP_FW_VERSION`, `components/app_state/include/app_version.h`,
+PATCH (10600) và hậu tố `v1.6.0` của mọi tên (macro `APP_FW_VERSION`, `components/app_state/include/app_version.h`,
 `main/matter_project_config.h`).
 
 **Bluetooth** (`sdkconfig.defaults`): `CONFIG_BT_ENABLED`, `CONFIG_BT_NIMBLE_ENABLED`, `CONFIG_ENABLE_CHIPOBLE`
@@ -893,7 +976,12 @@ xem `test/variant/sdkconfig.variant`) vẫn chạy, chỉ ghép qua Wi-Fi nhà.
 
 Bảng phân vùng (`partitions.csv`): `nvs` 128 KB (Wi-Fi, Matter, cấu hình), `ota_0`/`ota_1` 4 MB (hai khe firmware:
 bản đang chạy và bản cập nhật qua web), `irstore` 512 KB (lệnh IR, yêu cầu đặt lại gốc), `fctry` 24 KB (dành cho
-dữ liệu nhà máy). `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`: firmware cập nhật phải được ứng dụng xác nhận.
+dữ liệu nhà máy), `coredump` 256 KB (báo cáo sự cố, từ v1.6.0). `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`:
+firmware cập nhật phải được ứng dụng xác nhận.
+
+**Độ tin cậy** (`sdkconfig.defaults`): `CONFIG_ESP_TASK_WDT_PANIC=y`, `CONFIG_ESP_TASK_WDT_TIMEOUT_S=15`,
+`CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y`, `CONFIG_ESP_COREDUMP_STACK_SIZE=1792`,
+`CONFIG_FREERTOS_USE_TRACE_FACILITY=y`, `CONFIG_ENABLE_TEST_SETUP_PARAMS=n`.
 
 ---
 
@@ -901,10 +989,11 @@ dữ liệu nhà máy). `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`: firmware cậ
 
 ```
 main/                    app_main.cpp (thứ tự khởi động, nối các module, giữ BOOT, xác nhận firmware sau cập nhật),
-                         app_console.c (secrets/status/portal),
+                         app_console.c (secrets/status/diag/portal/pairing),
                          Kconfig.projbuild, matter_project_config.h, idf_component.yml
 components/
-  app_state/             nhật ký lỗi gần nhất, cờ "bận" (ghép, học IR) giữ cổng cấu hình mở
+  app_state/             nhật ký lỗi gần nhất, cờ "bận" (ghép, học IR) giữ cổng cấu hình mở,
+                         app_diag.c: tóm tắt báo cáo sự cố (core dump) và ngăn xếp các tác vụ
   config_store/          NVS (2 phân vùng), app_config_t + kiểm tra hợp lệ, đặt lại gốc lúc khởi động
   matter_thermostat/     node + endpoint Thermostat, dữ liệu ghép riêng từng thiết bị, cửa sổ ghép, QR, rời hệ sinh thái
   matter_commissioner/   Fabric B: issuer (RCAC/NOC/IPK), kho PAA offline, ghép/đọc/gỡ cảm biến
@@ -920,5 +1009,6 @@ components/
   web_config/            esp_http_server, API, kiểm soát truy cập, cập nhật firmware (/ota), giao diện offline (www/, nhúng gzip)
 test/host/               unit test gcc cho phần thuần
 test/web/                mock API + test trình duyệt cho giao diện
-tools/                   gen_paa_bundle.py, gzip_asset.py (chạy tự động khi build), package_firmware.py (đóng gói .bin)
+tools/                   gen_paa_bundle.py, gzip_asset.py (chạy tự động khi build), package_firmware.py (đóng gói .bin
+                         và bảng hàm), decode_backtrace.py (đổi địa chỉ của báo cáo sự cố thành tên hàm)
 ```

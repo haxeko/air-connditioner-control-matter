@@ -7,3 +7,6 @@ ota_0,     app,  ota_0,   0x40000,  0x400000,
 ota_1,     app,  ota_1,   0x440000, 0x400000,
 irstore,   data, nvs,     0x840000, 0x80000,
 fctry,     data, nvs,     0x8C0000, 0x6000,
+# Crash report of the last panic / watchdog reset (summary on the diagnostics page). Only boards
+# flashed with the full image from v1.6.0 have it; without it the firmware just stores no report.
+coredump,  data, coredump, 0x8D0000, 0x40000,

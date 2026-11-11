@@ -7,7 +7,9 @@
 #include "app_version.h"
 #include "climate_control.h"
 #include "esp_console.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "ir_transceiver.h"
 #include "matter_thermostat.h"
 #include "qrcode.h"
@@ -124,6 +126,67 @@ static int cmd_status(int argc, char **argv)
     return 0;
 }
 
+static const char *reset_reason_name(esp_reset_reason_t r)
+{
+    switch (r) {
+    case ESP_RST_POWERON:
+        return "power on";
+    case ESP_RST_SW:
+        return "software restart";
+    case ESP_RST_PANIC:
+        return "panic (exception or abort)";
+    case ESP_RST_TASK_WDT:
+        return "task watchdog (a task hung)";
+    case ESP_RST_INT_WDT:
+        return "interrupt watchdog";
+    case ESP_RST_WDT:
+        return "watchdog";
+    case ESP_RST_BROWNOUT:
+        return "brownout (supply voltage dropped)";
+    case ESP_RST_EXT:
+        return "reset pin";
+    default:
+        return "other";
+    }
+}
+
+/* Why the device restarted, the stored crash report (addresses only) and the stack margin of the tasks. */
+static int cmd_diag(int argc, char **argv)
+{
+    if (argc == 2 && strcmp(argv[1], "clear") == 0) {
+        esp_err_t err = app_crash_clear();
+        printf("crash report: %s\n", err == ESP_OK ? "cleared" : esp_err_to_name(err));
+        return err == ESP_OK ? 0 : 1;
+    }
+    printf("Firmware : %s, up %lu s, last reset: %s\n", APP_FW_VERSION, (unsigned long)app_time_s(),
+           reset_reason_name(esp_reset_reason()));
+    printf("Heap     : internal %u free (lowest %u), PSRAM %u free (lowest %u)\n",
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+           (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM));
+    app_crash_info_t ci;
+    if (app_crash_get(&ci)) {
+        printf("Crash    : task '%s', pc 0x%08x, cause %u %s, address 0x%08x, %s firmware (ELF %s)\n", ci.task, (unsigned)ci.pc,
+               (unsigned)ci.cause, app_crash_cause_text(ci.cause), (unsigned)ci.vaddr, ci.same_firmware ? "this" : "another",
+               ci.elf_sha);
+        printf("Backtrace:");
+        for (uint8_t i = 0; i < ci.depth; i++) {
+            printf(" 0x%08x", (unsigned)ci.bt[i]);
+        }
+        printf("%s\n           decode: python tools/decode_backtrace.py <addresses>; forget it: 'diag clear'\n",
+               ci.bt_corrupted ? " (incomplete)" : "");
+    } else {
+        printf("Crash    : no report stored\n");
+    }
+    static app_task_info_t tasks[40]; /* console task only */
+    size_t n = app_tasks_get(tasks, sizeof(tasks) / sizeof(tasks[0]));
+    printf("Stacks   : lowest free bytes since start\n");
+    for (size_t i = 0; i < n; i++) {
+        printf("  %-16s %6lu%s\n", tasks[i].name, (unsigned long)tasks[i].stack_free, tasks[i].stack_free < 512 ? "  LOW" : "");
+    }
+    return 0;
+}
+
 void app_console_start(void)
 {
     esp_console_repl_t *repl = NULL;
@@ -154,6 +217,8 @@ void app_console_start(void)
         { .command = "portal", .help = "Open the configuration portal (same as BOOT x3)", .func = cmd_portal },
         { .command = "pairing", .help = "Matter pairing mode: open the commissioning window (same as BOOT x2)", .func = cmd_pairing },
         { .command = "status", .help = "Short status", .func = cmd_status },
+        { .command = "diag", .help = "Reset reason, crash report, task stack margins ('diag clear' forgets the report)",
+          .func = cmd_diag },
     };
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
         esp_console_cmd_register(&cmds[i]);
@@ -164,5 +229,5 @@ void app_console_start(void)
         app_log_error("console", "start: %s", esp_err_to_name(err));
         return;
     }
-    ESP_LOGI(TAG, "console ready: 'help', 'status', 'secrets', 'pairing', 'portal'");
+    ESP_LOGI(TAG, "console ready: 'help', 'status', 'diag', 'secrets', 'pairing', 'portal'");
 }

@@ -27,6 +27,7 @@ typedef enum {
     EV_PROFILE,
     EV_FORCE,
     EV_REMOTE,
+    EV_FLUSH,
 } ev_type_t;
 
 typedef struct {
@@ -73,6 +74,7 @@ static bool s_force_next;
 static int64_t s_persist_at_ms;
 static climate_remote_cb_t s_remote_cb;
 static bool s_monitor_on;
+static SemaphoreHandle_t s_flush_done;
 
 static void post(const event_t *ev);
 
@@ -343,6 +345,19 @@ static void handle_remote(const uint8_t *blob, size_t len)
     }
 }
 
+/* The scheduled moment has come: transmit when the AC is not already in the wanted state. */
+static void send_due(void)
+{
+    s_send_at_ms = 0;
+    climate_output_t out;
+    evaluate(&out);
+    bool force = s_force_next;
+    s_force_next = false;
+    if (climate_link_needs_send(&s_link, &out.desired, force)) {
+        transmit(&out, force);
+    }
+}
+
 static void handle_event(const event_t *ev)
 {
     switch (ev->type) {
@@ -419,6 +434,16 @@ static void handle_event(const event_t *ev)
         handle_remote(ev->remote.blob, ev->remote.len);
         free(ev->remote.blob);
         break;
+    case EV_FLUSH:
+        if (s_send_at_ms != 0) {
+            send_due(); /* a change still waiting for its send delay */
+        }
+        if (s_persist_at_ms != 0) {
+            s_persist_at_ms = 0;
+            persist_runtime();
+        }
+        xSemaphoreGive(s_flush_done);
+        break;
     }
 }
 
@@ -447,14 +472,7 @@ static void task(void *arg)
             schedule(false); /* time based corrections (comp_interval) */
         }
         if (s_send_at_ms != 0 && now >= s_send_at_ms) {
-            s_send_at_ms = 0;
-            climate_output_t out;
-            evaluate(&out);
-            bool force = s_force_next;
-            s_force_next = false;
-            if (climate_link_needs_send(&s_link, &out.desired, force)) {
-                transmit(&out, force);
-            }
+            send_due();
         }
         if (s_persist_at_ms != 0 && now >= s_persist_at_ms) {
             s_persist_at_ms = 0;
@@ -472,8 +490,10 @@ esp_err_t climate_control_start(const app_config_t *cfg)
         return ESP_OK;
     }
     s_lock = xSemaphoreCreateMutexStatic(&s_lock_buf);
+    s_flush_done = xSemaphoreCreateBinary();
     s_queue = xQueueCreate(16, sizeof(event_t));
-    if (s_queue == NULL) {
+    if (s_queue == NULL || s_flush_done == NULL) {
+        s_queue = NULL;
         return ESP_ERR_NO_MEM;
     }
     s_cfg = *cfg;
@@ -561,6 +581,26 @@ esp_err_t climate_control_force_resend(void)
     event_t ev = { .type = EV_FORCE };
     post(&ev);
     return ESP_OK;
+}
+
+void climate_control_flush(uint32_t timeout_ms)
+{
+    if (s_queue == NULL) {
+        return;
+    }
+    TickType_t wait = pdMS_TO_TICKS(timeout_ms);
+    xSemaphoreTake(s_flush_done, 0); /* answer of an earlier call that timed out */
+    event_t ev = { .type = EV_FLUSH };
+    if (xQueueSend(s_queue, &ev, wait) != pdTRUE || xSemaphoreTake(s_flush_done, wait) != pdTRUE) {
+        app_log_error("climate", "state not saved before the restart (controller busy)");
+        return;
+    }
+    /* a command handed to the transmitter just now still has to leave the LED */
+    int64_t until = now_ms() + timeout_ms;
+    ir_tx_status_t tx;
+    for (ir_tx_get_status(&tx); (tx.busy || tx.pending) && now_ms() < until; ir_tx_get_status(&tx)) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
 }
 
 void climate_control_get_status(climate_status_t *out)

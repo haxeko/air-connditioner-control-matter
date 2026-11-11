@@ -31,6 +31,7 @@ STATE = {
     "fabrics": [{"index": 1, "vendor_id": 0x1349, "label": ""}, {"index": 3, "vendor_id": 0x6006, "label": "Nhà cũ"}],
     "ota": {"version": "1.0.0", "uploads": 0},
     "factory_reset": False,
+    "crash": True,
     "window_open": False,
     "binding": None,
     "pair": {"state": 0, "t": 0, "node": 0x1A2B3C4D5E6F7081},
@@ -271,6 +272,12 @@ def route(method, path, q, f):
                     "chip": {"model": 9, "revision": 2, "cores": 2, "flash": 16777216, "psram": 8388608,
                              "mac": "AA:BB:CC:11:22:33"},
                     "uptime_s": int(time.time() - T0) + 3600, "reset_reason": "Cấp nguồn",
+                    "crash": ({"present": True, "task": "climate", "pc": "0x4201a2c4", "cause": 28,
+                               "cause_text": "LoadProhibited", "vaddr": "0x00000004", "same_firmware": False,
+                               "bt_corrupted": False, "elf_sha": "3f9a1c0de",
+                               "bt": ["0x4201a2c1", "0x4201b7f0", "0x4037c1d9"]} if s["crash"] else {"present": False}),
+                    "tasks": [{"name": "sys_evt", "free": 420}, {"name": "ir", "free": 1840},
+                              {"name": "climate", "free": 3912}, {"name": "CHIP", "free": 5120}],
                     "heap_internal": {"total": 310000, "free": 92000, "min_free": 70000, "largest": 31000},
                     "heap_psram": {"total": 8300000, "free": 7600000, "min_free": 7500000, "largest": 7000000},
                     "nvs_main": {"used": 140, "free": 360, "total": 500}, "nvs_ir": {"used": 300, "free": 1700, "total": 2000},
@@ -446,6 +453,9 @@ def route(method, path, q, f):
         require(len(left) != len(s["fabrics"]), 404, "Hệ sinh thái này không còn trên thiết bị")
         s["fabrics"] = left
         return {"message": "Đang rời khỏi ứng dụng nhà đã chọn"}
+    if path == "system/crash_clear":
+        s["crash"] = False
+        return {"message": "Đã xóa báo cáo lỗi"}
     if path == "system/factory_reset":
         require(g("confirm") == "1", 400, "Thiếu xác nhận đặt lại gốc")
         require(s["binding"] is None or g("force") == "1", 409,

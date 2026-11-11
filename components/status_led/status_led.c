@@ -28,6 +28,7 @@ static const rgb_t k_off = { 0, 0, 0 };
 static const rgb_t k_blue = { 0, 0, 255 };
 static const rgb_t k_green = { 0, 255, 0 };
 static const rgb_t k_red = { 255, 0, 0 };
+static const rgb_t k_white = { 255, 255, 255 };
 
 static SemaphoreHandle_t s_lock;
 static StaticSemaphore_t s_lock_buf;
@@ -151,11 +152,17 @@ static rgb_t current_colour(void)
     if (s_flags & STATUS_LED_RESET_ARMED) {
         return (s_tick % 2) == 0 ? k_red : k_off; /* 0.1 s on / 0.1 s off */
     }
+    if (s_flags & STATUS_LED_IDENTIFY) {
+        return ((s_tick / 5) % 2) == 0 ? k_white : k_off; /* 0.5 s on / 0.5 s off */
+    }
     if (s_event == STATUS_LED_EVENT_PAIRED) {
         return k_green;
     }
     if (s_event == STATUS_LED_EVENT_ERROR) {
         return (s_event_ticks % 2) ? k_red : k_off; /* 3 fast red blinks */
+    }
+    if (s_event == STATUS_LED_EVENT_IDENTIFY) {
+        return ((s_event_ticks / 3) % 2) ? k_white : k_off; /* 3 white blinks, 0.3 s each */
     }
     if (s_flags & STATUS_LED_PAIRING) {
         return ((s_tick / BLINK_HALF_TICKS) % 2) == 0 ? k_blue : k_off;
@@ -231,7 +238,7 @@ void status_led_set(status_led_flag_t flag, bool on)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     uint32_t before = s_flags;
     s_flags = on ? (s_flags | flag) : (s_flags & ~(uint32_t)flag);
-    if ((s_flags & STATUS_LED_PAIRING) && !(before & STATUS_LED_PAIRING)) {
+    if ((s_flags & (STATUS_LED_PAIRING | STATUS_LED_IDENTIFY)) & ~before) {
         s_tick = 0; /* start the blink with "on" */
     }
     refresh_locked();
@@ -245,7 +252,7 @@ void status_led_event(status_led_event_t ev)
     }
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_event = (int)ev;
-    s_event_ticks = (ev == STATUS_LED_EVENT_PAIRED) ? 20 /* 2 s */ : 6 /* 3 blinks */;
+    s_event_ticks = (ev == STATUS_LED_EVENT_PAIRED) ? 20 /* 2 s */ : (ev == STATUS_LED_EVENT_IDENTIFY) ? 18 : 6 /* 3 blinks */;
     refresh_locked();
     xSemaphoreGive(s_lock);
 }

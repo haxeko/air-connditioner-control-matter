@@ -176,6 +176,15 @@ function fwImage(project, version) {
     check((await txt('#dg-fw')).includes('1.6.1'), 'esp_matter version shown');
     check((await txt('#dg-matter')).includes('5542'), 'commissioner UDP port shown');
     check((await txt('#dg-ota')).includes('ota_1'), 'update slot shown');
+    // crash report of an earlier restart and task stack margins
+    check((await txt('#dg-crash')).includes('climate') && (await txt('#dg-crash')).includes('0x4201a2c1 0x4201b7f0'),
+          'crash report: task and backtrace shown');
+    check((await txt('#dg-crash')).includes('LoadProhibited') && (await txt('#dg-crash')).includes('bản khác'),
+          'crash report: cause and firmware shown');
+    check((await page.locator('#dg-tasks').textContent()).includes('420 byte (thấp)'), 'low task stack margin flagged');
+    await page.click('#dg-crash-clear');
+    await page.waitForFunction(() => document.getElementById('dg-crash').textContent.includes('không có'));
+    check(await page.locator('#dg-crash-clear').isHidden(), 'crash report cleared');
     // firmware update: refused files (nothing changes on the device)
     await page.click('#ota-start');
     check((await txt('#ota-msg')).startsWith('Hãy chọn file'), 'update without a file refused');

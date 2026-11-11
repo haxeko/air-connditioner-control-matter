@@ -52,7 +52,8 @@ typedef enum {
 
 typedef struct {
     bool initialised;
-    bool busy;
+    bool busy;                 /* a command is being transmitted                 */
+    bool pending;              /* a command is waiting for the transmitter       */
     uint32_t sent;
     uint32_t failed;
     uint32_t dropped_duplicate;

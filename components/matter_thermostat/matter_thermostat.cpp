@@ -359,6 +359,12 @@ esp_err_t AttributeCallback(attribute::callback_type_t type, uint16_t endpoint_i
             if (val->val.i16 < sCaps.heat_min || val->val.i16 > sCaps.heat_max) {
                 return ESP_ERR_INVALID_ARG;
             }
+        } else if (attribute_id == Thermostat::Attributes::ControlSequenceOfOperation::Id) {
+            /* Follows the AC profile (cooling only, or cooling and heating): a controller cannot
+             * switch it to a sequence the AC does not have. */
+            if (sStarted && val->val.u8 != (sCaps.heat ? kSeqCoolingAndHeating : kSeqCoolingOnly)) {
+                return ESP_ERR_NOT_SUPPORTED;
+            }
         }
         return ESP_OK;
     }
@@ -401,10 +407,28 @@ esp_err_t AttributeCallback(attribute::callback_type_t type, uint16_t endpoint_i
     return ESP_OK;
 }
 
+/* CHIP thread. The application shows it on the status LED. */
 esp_err_t IdentifyCallback(identification::callback_type_t type, uint16_t endpoint_id, uint8_t effect_id,
                            uint8_t effect_variant, void * priv_data)
 {
-    ESP_LOGI(TAG, "identify %s on endpoint %u", type == identification::START ? "start" : "stop", endpoint_id);
+    (void) effect_id;
+    (void) effect_variant;
+    (void) priv_data;
+    switch (type) {
+    case identification::START:
+        ESP_LOGI(TAG, "identify start on endpoint %u", endpoint_id);
+        NotifyUi(MATTER_UI_IDENTIFY_START);
+        break;
+    case identification::STOP:
+        ESP_LOGI(TAG, "identify stop on endpoint %u", endpoint_id);
+        NotifyUi(MATTER_UI_IDENTIFY_STOP);
+        break;
+    case identification::EFFECT:
+        NotifyUi(MATTER_UI_IDENTIFY_EFFECT);
+        break;
+    default:
+        break;
+    }
     return ESP_OK;
 }
 
@@ -587,6 +611,12 @@ void InitAfterServer(intptr_t)
             esp_matter_attr_val_t v = esp_matter_int16(clamped);
             attribute::update(sEndpointId, Thermostat::Id, Thermostat::Attributes::OccupiedHeatingSetpoint::Id, &v);
         }
+    }
+    {
+        /* Follows the profile; a stored value can be stale (older firmware accepted writes, or the
+         * profile gained or lost heating). Unchanged values are not written again. */
+        esp_matter_attr_val_t seq = esp_matter_enum8(sCaps.heat ? kSeqCoolingAndHeating : kSeqCoolingOnly);
+        attribute::update(sEndpointId, Thermostat::Id, Thermostat::Attributes::ControlSequenceOfOperation::Id, &seq);
     }
     sRestoring = false;
 

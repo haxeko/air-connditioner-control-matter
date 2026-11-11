@@ -7,7 +7,8 @@
  * Indications, highest priority first:
  *   RESET_NOW      factory reset in progress (BOOT held 20 s): steady RED
  *   RESET_ARMED    BOOT held 10 s: fast blinking RED (release = leave all home apps)
- *   short events   paired: green 2 s / error: 3 fast red blinks (plain LED: same timing)
+ *   IDENTIFY       a home app identifies the device: blinking WHITE (0.5 s on / 0.5 s off)
+ *   short events   paired: green 2 s / error: 3 fast red blinks / identify effect: 3 white blinks
  *   PAIRING        Matter commissioning window open: blinking BLUE (0.4 s on / 0.4 s off)
  *   PORTAL         configuration SoftAP open: steady green (plain LED: steady on)
  *   nothing        off
@@ -27,11 +28,13 @@ typedef enum {
     STATUS_LED_PAIRING = 1u << 1,
     STATUS_LED_RESET_ARMED = 1u << 2,
     STATUS_LED_RESET_NOW = 1u << 3,
+    STATUS_LED_IDENTIFY = 1u << 4,
 } status_led_flag_t;
 
 typedef enum {
     STATUS_LED_EVENT_PAIRED = 0, /* the thermostat was added to a home ecosystem */
     STATUS_LED_EVENT_ERROR,      /* an action could not be performed (e.g. no Wi-Fi for pairing) */
+    STATUS_LED_EVENT_IDENTIFY,   /* one-shot identify effect requested by a home app */
 } status_led_event_t;
 
 esp_err_t status_led_init(void);

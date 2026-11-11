@@ -141,6 +141,7 @@ static tx_request_t s_pending;
 static bool s_has_pending;
 static ir_tx_status_t s_tx_status;
 static uint32_t s_last_crc;
+static bool s_last_crc_valid; /* s_lock: the AC is still in the state of the last command we sent */
 static int64_t s_last_tx_end_us;
 static uint16_t s_carrier_hz = CONFIG_APP_IR_CARRIER_HZ;
 static uint16_t s_applied_carrier_hz;
@@ -424,6 +425,11 @@ static void monitor_finish(bool usable)
     } else {
         s_mon_status.discarded++;
     }
+    if (blob != NULL) {
+        /* The remote changed the AC: the command we sent last is no longer what the AC is doing, so
+         * sending the same command again right away is not a duplicate. */
+        s_last_crc_valid = false;
+    }
     unlock();
     if (blob != NULL && cb != NULL) {
         ESP_LOGI(TAG, "remote: %u segment(s), %u level(s) received", s_mon_cap.code.segment_count,
@@ -513,6 +519,9 @@ static esp_err_t apply_carrier(uint16_t hz)
         .duty_cycle = (float)CONFIG_APP_IR_CARRIER_DUTY_PERCENT / 100.0f,
     };
     esp_err_t err = rmt_disable(s_tx);
+    if (err == ESP_ERR_INVALID_STATE) {
+        err = ESP_OK; /* already disabled: an earlier enable failed */
+    }
     if (err == ESP_OK) {
         err = rmt_apply_carrier(s_tx, &carrier);
     }
@@ -567,13 +576,24 @@ static esp_err_t transmit_blob(const uint8_t *blob, size_t len, uint8_t repeats)
     uint64_t dur_us = ir_code_duration_us(&code);
     int timeout_ms = (int)(dur_us / 1000) + 500;
     rmt_transmit_config_t cfg = { .loop_count = 0, .flags = { .eot_level = 0 } };
+    bool queued = false;
     for (uint8_t r = 0; r <= repeats && err == ESP_OK; r++) {
         if (r > 0) {
             vTaskDelay(pdMS_TO_TICKS(CONFIG_APP_IR_TX_MIN_GAP_MS));
         }
         err = rmt_transmit(s_tx, s_copy_encoder, syms, nsym * sizeof(rmt_symbol_word_t), &cfg);
         if (err == ESP_OK) {
+            queued = true;
             err = rmt_tx_wait_all_done(s_tx, timeout_ms);
+        }
+    }
+    if (queued && err != ESP_OK) {
+        /* Not finished in time: the transmit interrupt may still be reading `syms`. Stop the channel
+         * (this drops the transaction and leaves the LED off) before the buffer is released. */
+        rmt_disable(s_tx);
+        vTaskDelay(pdMS_TO_TICKS(2)); /* an interrupt already running on the other core */
+        if (rmt_enable(s_tx) != ESP_OK) {
+            s_applied_carrier_hz = 0; /* apply_carrier() enables the channel again before the next command */
         }
     }
 out:
@@ -627,6 +647,7 @@ static void worker(void *arg)
                 s_tx_status.last_source = req.source;
                 strlcpy(s_tx_status.last_label, req.label, sizeof(s_tx_status.last_label));
                 s_last_crc = req.crc;
+                s_last_crc_valid = true;
             } else {
                 s_tx_status.failed++;
             }
@@ -791,7 +812,7 @@ esp_err_t ir_send(const uint8_t *blob, size_t len, ir_source_t source, bool forc
     int64_t now = esp_timer_get_time();
 
     lock();
-    if (!force && s_tx_status.last_sent_us != 0 && crc == s_last_crc &&
+    if (!force && s_last_crc_valid && s_tx_status.last_sent_us != 0 && crc == s_last_crc &&
         now - s_tx_status.last_sent_us < (int64_t)CONFIG_APP_IR_TX_DUPLICATE_WINDOW_MS * 1000) {
         s_tx_status.dropped_duplicate++;
         unlock();
@@ -835,6 +856,7 @@ void ir_tx_get_status(ir_tx_status_t *out)
     }
     lock();
     *out = s_tx_status;
+    out->pending = s_has_pending;
     unlock();
 }
 

@@ -466,6 +466,17 @@
       <ul id="dg-errors" class="list"></ul>
     </div>
     <div class="card">
+      <h2>Sự cố khởi động lại</h2>
+      <dl class="kv" id="dg-crash"></dl>
+      <p class="note" id="dg-crash-note" hidden>Thiết bị đã tự khởi động lại vì lỗi firmware. Hãy gửi nguyên các dòng trên (chỉ là địa chỉ trong chương trình, không chứa mật khẩu hay mã ghép) cho người hỗ trợ, rồi xóa báo cáo.</p>
+      <div class="row"><button id="dg-crash-clear" class="btn" type="button" hidden>Xóa báo cáo</button></div>
+      <details>
+        <summary>Ngăn xếp của các tác vụ</summary>
+        <p class="note">Số byte còn trống ít nhất từ lúc khởi động (ít nhất xếp trước). Dưới 512 byte là sát giới hạn.</p>
+        <dl class="kv" id="dg-tasks"></dl>
+      </details>
+    </div>
+    <div class="card">
       <h2>Cập nhật firmware</h2>
       <dl class="kv" id="dg-ota"></dl>
       <p class="note">Chọn file <b>ac_matter_ir_vX.Y.Z_app_0x40000.bin</b> (file app, không phải file full). Wi-Fi, mã ghép, hệ sinh thái, cảm biến, profile IR và cài đặt được giữ nguyên. Sau khi cập nhật, tên Wi-Fi cấu hình đổi theo phiên bản mới. Firmware mới chạy thử 60 giây: nếu thiết bị khởi động lại trong thời gian đó thì tự quay về bản cũ (cần bootloader từ v1.5.0: bo nạp lần đầu bằng bản cũ hơn thì nạp thêm file bootloader qua UART một lần).</p>

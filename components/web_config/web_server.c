@@ -7,6 +7,7 @@
 #include <strings.h>
 
 #include "app_state.h"
+#include "climate_control.h"
 #include "esp_app_desc.h"
 #include "esp_app_format.h"
 #include "esp_heap_caps.h"
@@ -610,6 +611,7 @@ static void defer_task(void *arg)
         case WEB_DEFER_REBOOT:
             ESP_LOGW(TAG, "restart requested from the configuration portal");
             wifi_config_reopen_after_reboot();
+            climate_control_flush(1500);
             esp_restart();
             break;
         case WEB_DEFER_UNBIND_NODE: {

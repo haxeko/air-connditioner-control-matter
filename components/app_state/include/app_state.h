@@ -4,6 +4,7 @@
  * Small shared state that does not belong to a single module:
  *   - ring buffer of the most recent errors (shown on the diagnostics page),
  *   - "busy" flags that keep the configuration portal alive (pairing, IR learning),
+ *   - the crash report of the last panic / watchdog reset and the stack margin of the tasks,
  *   - monotonic time helpers.
  *
  * Never put secrets (passwords, setup codes, keys) into the error log.
@@ -13,6 +14,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "esp_err.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -53,6 +56,43 @@ uint32_t app_state_get_busy(void);
  * is erased at the next start. Does not return on success. Not from the CHIP task.
  */
 void app_factory_reset(void);
+
+/*
+ * Crash report: when the firmware panics (exception, abort, task or interrupt watchdog), the panic
+ * handler stores a core dump in the "coredump" flash partition before the restart. Only its summary
+ * is exposed: which task, where (program counter and return addresses) and why. tools/decode_backtrace.py
+ * turns the addresses into function names with the symbol file published next to each firmware.
+ * No memory contents are shown anywhere. The report stays until it is cleared or replaced.
+ */
+#define APP_CRASH_BT_MAX 16
+
+typedef struct {
+    bool present;
+    bool same_firmware;        /* stored by the firmware that is running now */
+    bool bt_corrupted;
+    uint8_t depth;             /* valid entries of bt[] */
+    char task[16];
+    uint32_t pc;
+    uint32_t cause;            /* Xtensa EXCCAUSE (meaningless for abort / watchdog) */
+    uint32_t vaddr;            /* address that was accessed */
+    uint32_t bt[APP_CRASH_BT_MAX];
+    char elf_sha[17];          /* start of the ELF SHA-256 of the firmware that crashed */
+} app_crash_info_t;
+
+/** Read the stored report once. Call early in app_main(). */
+void app_crash_init(void);
+bool app_crash_get(app_crash_info_t *out);
+esp_err_t app_crash_clear(void);
+/** Name of an exception cause, "" when unknown. */
+const char *app_crash_cause_text(uint32_t cause);
+
+typedef struct {
+    char name[16];
+    uint32_t stack_free;       /* smallest free stack since the task started (bytes) */
+} app_task_info_t;
+
+/** Tasks sorted by stack margin, smallest first. Returns the number written (0 without trace facility). */
+size_t app_tasks_get(app_task_info_t *out, size_t max);
 
 /** Microseconds since boot (esp_timer). */
 int64_t app_time_us(void);

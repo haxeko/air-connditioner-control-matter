@@ -962,6 +962,18 @@
       ['Phiên bản đang chạy', fw.version + (ota.trial ? ' (đang chạy thử, chưa xác nhận)' : '')],
       ['Khe đang chạy', ota.running || '-'], ['Khe sẽ ghi', ota.next ? ota.next + ' (tối đa ' + fmtBytes(ota.max_size) + ')' : 'không có'],
     ]);
+    const cr = j.crash;
+    kv('dg-crash', cr.present ? [
+      ['Tác vụ', cr.task], ['Vị trí (PC)', cr.pc],
+      ['Nguyên nhân', cr.cause_text ? cr.cause_text + ', địa chỉ ' + cr.vaddr : 'mã ' + cr.cause + ' (abort hoặc watchdog)'],
+      ['Backtrace', cr.bt.join(' ') + (cr.bt_corrupted ? ' (không đầy đủ)' : '')],
+      ['Firmware lúc lỗi', (cr.same_firmware ? 'bản đang chạy' : 'bản khác') + ' (ELF ' + cr.elf_sha + ')'],
+    ] : [['Báo cáo lỗi', 'không có'], ['Lý do khởi động lần này', j.reset_reason]]);
+    $('dg-crash-note').hidden = !cr.present;
+    $('dg-crash-clear').hidden = !cr.present;
+    kv('dg-tasks', j.tasks.length
+      ? j.tasks.map((t) => [t.name, t.free + ' byte' + (t.free < 512 ? ' (thấp)' : '')])
+      : [['Tác vụ', 'firmware này không đo']]);
     $('dg-errors').replaceChildren(
       ...(j.errors.length
         ? j.errors.map((e) => el('li', null, el('span', null, '[' + e.module + '] ' + e.msg), el('span', { class: 'muted small' }, fmtAge(e.age_s))))
@@ -975,6 +987,10 @@
     }
   }
   $('dg-reboot').addEventListener('click', reboot);
+
+  $('dg-crash-clear').addEventListener('click', async () => {
+    if (await act('system/crash_clear', {}, 'Đã xóa báo cáo lỗi')) refresh();
+  });
 
   $('dg-freset').addEventListener('click', async () => {
     if (!confirm('ĐẶT LẠI GỐC?\nXóa Wi-Fi, mọi hệ sinh thái nhà, cảm biến đã ghép và toàn bộ cài đặt. Giữ lại mã ghép Matter và profile IR.\nKhông hoàn tác được.')) return;

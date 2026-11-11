@@ -1627,8 +1627,10 @@ static const char *reset_reason_text(esp_reset_reason_t r)
         return "Khởi động lại bằng phần mềm";
     case ESP_RST_PANIC:
         return "Lỗi nghiêm trọng (panic)";
-    case ESP_RST_INT_WDT:
     case ESP_RST_TASK_WDT:
+        return "Watchdog: một tác vụ bị treo";
+    case ESP_RST_INT_WDT:
+        return "Watchdog: ngắt bị chặn quá lâu";
     case ESP_RST_WDT:
         return "Watchdog";
     case ESP_RST_BROWNOUT:
@@ -1662,6 +1664,63 @@ static void put_nvs(wj_t *w, const char *key, const char *part)
         wj_uint(w, "total", total);
     }
     wj_obj_end(w);
+}
+
+/* Summary of the crash report (app_state.h): addresses only, never memory contents. */
+static void put_crash(wj_t *w)
+{
+    app_crash_info_t ci;
+    wj_obj_begin(w, "crash");
+    wj_bool(w, "present", app_crash_get(&ci));
+    if (ci.present) {
+        char hex[12];
+        wj_str(w, "task", ci.task);
+        snprintf(hex, sizeof(hex), "0x%08x", (unsigned)ci.pc);
+        wj_str(w, "pc", hex);
+        wj_uint(w, "cause", ci.cause);
+        wj_str(w, "cause_text", app_crash_cause_text(ci.cause));
+        snprintf(hex, sizeof(hex), "0x%08x", (unsigned)ci.vaddr);
+        wj_str(w, "vaddr", hex);
+        wj_bool(w, "same_firmware", ci.same_firmware);
+        wj_bool(w, "bt_corrupted", ci.bt_corrupted);
+        wj_str(w, "elf_sha", ci.elf_sha);
+        wj_arr_begin(w, "bt");
+        for (uint8_t i = 0; i < ci.depth; i++) {
+            snprintf(hex, sizeof(hex), "0x%08x", (unsigned)ci.bt[i]);
+            wj_str(w, NULL, hex);
+        }
+        wj_arr_end(w);
+    }
+    wj_obj_end(w);
+}
+
+#define DIAG_MAX_TASKS 48
+
+static void put_tasks(wj_t *w)
+{
+    wj_arr_begin(w, "tasks");
+    app_task_info_t *t = malloc(DIAG_MAX_TASKS * sizeof(app_task_info_t));
+    if (t != NULL) {
+        size_t n = app_tasks_get(t, DIAG_MAX_TASKS);
+        for (size_t i = 0; i < n; i++) {
+            wj_obj_begin(w, NULL);
+            wj_str(w, "name", t[i].name);
+            wj_uint(w, "free", t[i].stack_free);
+            wj_obj_end(w);
+        }
+        free(t);
+    }
+    wj_arr_end(w);
+}
+
+static void post_system_crash_clear(api_ctx_t *c)
+{
+    esp_err_t err = app_crash_clear();
+    if (err != ESP_OK) {
+        api_fail(c, 500, "Không xóa được báo cáo lỗi");
+        return;
+    }
+    wj_str(c->w, "message", "Đã xóa báo cáo lỗi");
 }
 
 static void get_diag(api_ctx_t *c)
@@ -1713,6 +1772,8 @@ static void get_diag(api_ctx_t *c)
 
     wj_uint(w, "uptime_s", app_time_s());
     wj_str(w, "reset_reason", reset_reason_text(esp_reset_reason()));
+    put_crash(w);
+    put_tasks(w);
     put_heap(w, "heap_internal", MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     put_heap(w, "heap_psram", MALLOC_CAP_SPIRAM);
     put_nvs(w, "nvs_main", CFG_PART_MAIN);
@@ -1830,6 +1891,7 @@ const api_route_t g_api_routes[] = {
     { "diag", get_diag, NULL },
     { "system/reboot", NULL, post_system_reboot },
     { "system/factory_reset", NULL, post_system_factory_reset },
+    { "system/crash_clear", NULL, post_system_crash_clear },
 };
 
 const size_t g_api_route_count = sizeof(g_api_routes) / sizeof(g_api_routes[0]);

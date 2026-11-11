@@ -30,6 +30,21 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
 # ---------------------------------------------------------------------------
+# Unattended device: a hang ends in a restart, and the reason can be read afterwards.
+# ---------------------------------------------------------------------------
+# A task that keeps a CPU for 15 s (the idle task never runs) panics and restarts the device;
+# the default only prints a warning on the serial port and stays hung.
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=15
+# The panic handler stores a core dump in the "coredump" partition (partitions.csv). Only its
+# summary (task, addresses, cause) is shown on the diagnostics page; see app_state.h.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+# Own stack for writing it: the crashed task may have none left (stack overflow).
+CONFIG_ESP_COREDUMP_STACK_SIZE=1792
+# Stack margin of every task on the diagnostics page (uxTaskGetSystemState).
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+
+# ---------------------------------------------------------------------------
 # Matter: server (thermostat) + commissioner on the same CHIP stack
 # ---------------------------------------------------------------------------
 CONFIG_ESP_MATTER_ENABLE_MATTER_SERVER=y
@@ -44,6 +59,8 @@ CONFIG_CHIP_PROJECT_CONFIG="main/matter_project_config.h"
 
 # Unique per-device setup passcode/discriminator generated on first boot (see device_identity.cpp)
 CONFIG_CUSTOM_COMMISSIONABLE_DATA_PROVIDER=y
+# No fallback to the SDK's well-known test passcode/discriminator (20202021 / 3840) anywhere.
+CONFIG_ENABLE_TEST_SETUP_PARAMS=n
 # Test DAC (uncertified product). Use esp-matter-mfg-tool + factory partition for real DACs.
 CONFIG_EXAMPLE_DAC_PROVIDER=y
 

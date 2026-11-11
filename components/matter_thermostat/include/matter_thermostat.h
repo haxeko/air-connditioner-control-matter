@@ -80,6 +80,9 @@ typedef enum {
     MATTER_UI_WINDOW_OPENED = 0, /* pairing mode: the thermostat can be added with its QR/manual code */
     MATTER_UI_WINDOW_CLOSED,
     MATTER_UI_COMMISSIONED,      /* added to a home ecosystem */
+    MATTER_UI_IDENTIFY_START,    /* a home app asks "which device is this?" (Identify cluster) */
+    MATTER_UI_IDENTIFY_STOP,
+    MATTER_UI_IDENTIFY_EFFECT,   /* one-shot identify effect (TriggerEffect) */
 } matter_ui_event_t;
 
 /** Called on the CHIP thread; must not block. Register before matter_thermostat_start(). */
