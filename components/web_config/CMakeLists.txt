@@ -2,7 +2,7 @@ idf_component_register(SRCS "web_server.c" "web_api.c" "web_util.c"
                        INCLUDE_DIRS "include"
                        PRIV_INCLUDE_DIRS "."
                        PRIV_REQUIRES esp_http_server esp_netif lwip esp_timer esp_system esp_app_format esp_psram
-                                     heap esp_hw_support spi_flash
+                                     heap esp_hw_support spi_flash app_update esp_partition
                                      app_state config_store wifi_config matter_thermostat matter_commissioner
                                      remote_temperature climate_control ac_profiles ir_transceiver qrcode)
 

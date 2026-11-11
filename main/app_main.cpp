@@ -6,6 +6,8 @@
  *   sensor (Fabric B) --subscription--> remote_temperature --> LocalTemperature + climate_control
  *   BOOT x2 --> button_handler --> Matter pairing mode (commissioning window), status LED blinks blue
  *   BOOT x3 --> button_handler --> wifi_config (SoftAP) --> web_config (portal, started once)
+ *   BOOT held 10 s, released --> leave all home ecosystems; held 20 s --> factory reset (app_system)
+ *   firmware file uploaded on the portal --> other OTA slot --> restart --> confirmed after a trial run
  *
  * Start order matters:
  *   1. NVS, netif, default event loop, SoftAP netif (before esp_matter::start() creates the Wi-Fi stack)
@@ -25,6 +27,11 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_ota_ops.h"
+#include "esp_system.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "ir_transceiver.h"
 #include "matter_thermostat.h"
 #include "remote_temperature.h"
@@ -135,6 +142,85 @@ static void on_boot_sequence(uint8_t presses)
     }
 }
 
+/* Seconds a freshly updated firmware must run before it is kept (see confirm_firmware_later()). */
+#define FIRMWARE_TRIAL_S 60
+
+/* Button task. Long holds of BOOT, see press_detector.h for the stages. */
+static void on_boot_hold(hold_event_t ev)
+{
+    switch (ev)
+    {
+    case HOLD_STAGE1_REACHED:
+        status_led_set(STATUS_LED_RESET_ARMED, true);
+        ESP_LOGW(TAG, "BOOT held %d s: release now to leave all home apps, keep holding until %d s for a factory reset",
+                 CONFIG_APP_BUTTON_HOLD_UNLINK_S, CONFIG_APP_BUTTON_HOLD_RESET_S);
+        break;
+    case HOLD_STAGE1_RELEASED: {
+        status_led_set(STATUS_LED_RESET_ARMED, false);
+        esp_err_t err = matter_thermostat_remove_all_home_fabrics();
+        if (err != ESP_OK)
+        {
+            app_log_error("app", "leaving the home apps: %s", esp_err_to_name(err));
+            status_led_event(STATUS_LED_EVENT_ERROR);
+        }
+        else
+        {
+            ESP_LOGW(TAG, "BOOT released: leaving all home apps (Wi-Fi, sensor, profiles and settings are kept)");
+        }
+        break;
+    }
+    case HOLD_STAGE2_REACHED:
+        status_led_set(STATUS_LED_RESET_ARMED, false);
+        status_led_set(STATUS_LED_RESET_NOW, true);
+        ESP_LOGW(TAG, "BOOT held %d s: factory reset", CONFIG_APP_BUTTON_HOLD_RESET_S);
+        app_factory_reset(); /* does not return when the request could be stored */
+        status_led_set(STATUS_LED_RESET_NOW, false);
+        status_led_event(STATUS_LED_EVENT_ERROR);
+        break;
+    default:
+        break;
+    }
+}
+
+/*
+ * A firmware written by the portal's update page starts "on trial" (bootloader with app rollback):
+ * if it resets before it is confirmed, the bootloader returns to the previous firmware. It is
+ * confirmed once it has run FIRMWARE_TRIAL_S with Matter, Wi-Fi and the portal code started.
+ */
+static void confirm_firmware(void * arg)
+{
+    (void) arg;
+    esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+    if (err == ESP_OK)
+    {
+        ESP_LOGI(TAG, "firmware %s confirmed after %d s: it stays", APP_FW_VERSION, FIRMWARE_TRIAL_S);
+    }
+    else
+    {
+        app_log_error("app", "firmware not confirmed: %s", esp_err_to_name(err));
+    }
+}
+
+static void confirm_firmware_later(void)
+{
+    esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+    const esp_partition_t * running = esp_ota_get_running_partition();
+    if (running == nullptr || esp_ota_get_state_partition(running, &state) != ESP_OK || state != ESP_OTA_IMG_PENDING_VERIFY)
+    {
+        return; /* flashed over serial, already confirmed, or a bootloader without rollback */
+    }
+    ESP_LOGW(TAG, "updated firmware %s on trial: kept after %d s without a reset, otherwise the previous one returns",
+             APP_FW_VERSION, FIRMWARE_TRIAL_S);
+    static esp_timer_handle_t timer;
+    const esp_timer_create_args_t args = { .callback = confirm_firmware, .arg = nullptr, .dispatch_method = ESP_TIMER_TASK,
+                                           .name = "fw_confirm", .skip_unhandled_events = false };
+    if (esp_timer_create(&args, &timer) != ESP_OK ||
+        esp_timer_start_once(timer, static_cast<uint64_t>(FIRMWARE_TRIAL_S) * 1000000ULL) != ESP_OK)
+    {
+        confirm_firmware(nullptr); /* no timer: better kept than rolled back at the next restart */
+    }
+}
+
 static void on_portal(bool open)
 {
     web_config_portal_hook(open);
@@ -166,10 +252,29 @@ static void non_fatal(const char * what, esp_err_t err)
     }
 }
 
+/* See app_state.h. Any task except the CHIP task. */
+extern "C" void app_factory_reset(void)
+{
+    esp_err_t err = config_store_request_factory_reset();
+    if (err != ESP_OK)
+    {
+        app_log_error("app", "factory reset not started: %s", esp_err_to_name(err));
+        return;
+    }
+    /* Tell the hubs that are reachable (Leave event) before everything is erased at the next start. */
+    matter_thermostat_remove_all_home_fabrics();
+    vTaskDelay(pdMS_TO_TICKS(2500));
+    esp_restart();
+}
+
 extern "C" void app_main(void)
 {
     app_state_init();
     ESP_ERROR_CHECK(config_store_init());
+    if (config_store_was_factory_reset())
+    {
+        app_log_error("app", "Đã đặt lại gốc: Wi-Fi, hệ sinh thái, cảm biến và cài đặt đã xóa");
+    }
     ESP_ERROR_CHECK(esp_netif_init());
     esp_err_t err = esp_event_loop_create_default();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
@@ -227,7 +332,8 @@ extern "C" void app_main(void)
     non_fatal("remote temperature", remote_temperature_start());
 
     ESP_ERROR_CHECK(wifi_config_start(on_portal));
-    non_fatal("BOOT button", button_handler_start(on_boot_sequence));
+    non_fatal("BOOT button", button_handler_start(on_boot_sequence, on_boot_hold));
     app_console_start();
+    confirm_firmware_later();
     ESP_LOGI(TAG, "running");
 }

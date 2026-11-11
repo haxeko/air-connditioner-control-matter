@@ -86,3 +86,57 @@ bool press_detector_busy(const press_detector_t *d, int64_t now_ms)
     (void)now_ms;
     return d->stable_pressed || d->candidate_pressed != d->stable_pressed || d->in_sequence;
 }
+
+/* ------------------------------------------------------------------------------------------ */
+
+void hold_detector_init(hold_detector_t *d, const hold_detector_cfg_t *cfg)
+{
+    memset(d, 0, sizeof(*d));
+    d->cfg = *cfg;
+}
+
+hold_event_t hold_detector_feed(hold_detector_t *d, bool raw_pressed, int64_t now_ms)
+{
+    if (!d->started) {
+        d->started = true;
+        d->candidate_pressed = raw_pressed;
+        d->candidate_since = now_ms;
+    } else if (raw_pressed != d->candidate_pressed) {
+        /* The caller may not sample while the button is idle: a release that lasted long enough is
+         * recognised when the next press arrives. */
+        if (!d->candidate_pressed && (now_ms - d->candidate_since) >= (int64_t)d->cfg.debounce_ms) {
+            d->armed = true;
+        }
+        d->candidate_pressed = raw_pressed;
+        d->candidate_since = now_ms;
+    }
+    const bool settled = (now_ms - d->candidate_since) >= (int64_t)d->cfg.debounce_ms;
+    if (settled && !d->candidate_pressed) {
+        d->armed = true;
+    }
+    if (settled && d->candidate_pressed != d->stable_pressed) {
+        d->stable_pressed = d->candidate_pressed;
+        if (d->stable_pressed) {
+            d->press_start = d->candidate_since;
+            d->stage = 0;
+            d->counting = d->armed;
+        } else {
+            const bool stage1_only = d->counting && d->stage == 1;
+            d->stage = 0;
+            d->counting = false;
+            return stage1_only ? HOLD_STAGE1_RELEASED : HOLD_NONE;
+        }
+    }
+    if (d->stable_pressed && d->counting) {
+        const int64_t held = now_ms - d->press_start;
+        if (d->stage == 0 && held >= (int64_t)d->cfg.stage1_ms) {
+            d->stage = 1;
+            return HOLD_STAGE1_REACHED;
+        }
+        if (d->stage == 1 && held >= (int64_t)d->cfg.stage2_ms) {
+            d->stage = 2;
+            return HOLD_STAGE2_REACHED;
+        }
+    }
+    return HOLD_NONE;
+}

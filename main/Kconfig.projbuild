@@ -158,6 +158,24 @@ menu "AC Matter IR controller"
             int "A press held longer than this is not a short press (ms)"
             range 200 2000
             default 700
+
+        config APP_BUTTON_HOLD_UNLINK_S
+            int "Hold this long, then release: leave all home ecosystems (s)"
+            range 5 30
+            default 10
+            help
+                The status LED blinks red fast once this time is reached. Releasing the button then
+                removes every home fabric (Apple Home, Google Home, ...) on the device side; Wi-Fi, the
+                sensor, the IR profiles and the settings are kept and Matter pairing mode opens again.
+
+        config APP_BUTTON_HOLD_RESET_S
+            int "Keep holding this long: factory reset (s)"
+            range 10 60
+            default 20
+            help
+                Must be at least 5 s more than the leave-home hold. Erases Wi-Fi, all Matter fabrics
+                (also the device's own sensor fabric), the sensor and all settings; the pairing code
+                (QR / 11 digits) and the IR profiles are kept. The LED turns steady red.
     endmenu
 
     menu "Configuration portal (SoftAP + web)"

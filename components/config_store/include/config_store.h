@@ -35,8 +35,21 @@ extern "C" {
 #define CFG_NS_RUNTIME "ac_rt"     /* last IR state sent, compensation offset       */
 #define CFG_NS_PROFILE "ac_prof"   /* on CFG_PART_IR: profiles and IR codes          */
 
-/** Initialise both NVS partitions (erases a partition only if its layout is incompatible). */
+/** Initialise both NVS partitions (erases a partition only if its layout is incompatible) and carry
+ *  out a factory reset requested before the restart. */
 esp_err_t config_store_init(void);
+
+/**
+ * Ask for a factory reset; the caller restarts the device afterwards. At the next start, before any
+ * other module reads its data, the whole "nvs" partition is erased: Wi-Fi, every Matter fabric
+ * (home ecosystems and the device's own sensor fabric), the paired sensor and all settings. Kept:
+ * the Matter pairing code (namespace CFG_NS_IDENTITY, so a printed QR label stays valid) and the IR
+ * profiles ("irstore" partition). The request itself is stored on "irstore" so it survives the erase.
+ */
+esp_err_t config_store_request_factory_reset(void);
+
+/** True if this boot carried out a factory reset. */
+bool config_store_was_factory_reset(void);
 
 esp_err_t cfg_get_blob(const char *part, const char *ns, const char *key, void *buf, size_t *inout_len);
 esp_err_t cfg_set_blob(const char *part, const char *ns, const char *key, const void *buf, size_t len);

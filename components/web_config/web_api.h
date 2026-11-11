@@ -39,6 +39,7 @@ typedef enum {
     WEB_DEFER_CLOSE_PORTAL = 0, /* after the HTTP response has left                    */
     WEB_DEFER_REBOOT,
     WEB_DEFER_UNBIND_NODE,      /* sensor RemoveFabric succeeded: forget its binding    */
+    WEB_DEFER_FACTORY_RESET,    /* app_factory_reset(): leaves the homes, erases, restarts */
 } web_defer_action_t;
 
 /** Run an action later in the portal worker task (never in the HTTP or CHIP task). */

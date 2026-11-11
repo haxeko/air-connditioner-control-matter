@@ -32,6 +32,9 @@
   let timer = null;
   let closed = false;
   let fast = false;
+  let uploading = false; /* firmware upload in progress: the single-threaded server cannot answer polls */
+  let otaMax = 0;
+  let sensorBound = false;
   const st = { ac: null, editSlot: null, codesSlot: null, codes: [], learnSession: 0, sensor: null, dirty: {},
     detecting: false, detectSession: 0, detect: null };
 
@@ -205,7 +208,7 @@
 
   function schedule(ms) {
     clearTimeout(timer);
-    if (!closed) timer = setTimeout(() => refresh(false), ms);
+    if (!closed && !uploading) timer = setTimeout(() => refresh(false), ms);
   }
 
   async function refresh(user) {
@@ -360,9 +363,21 @@
     $('hm-fabrics').replaceChildren(
       ...(j.fabrics.length
         ? j.fabrics.map((f) =>
-            el('li', null, el('span', null, f.label || 'Không có nhãn'), el('span', { class: 'muted small' }, 'fabric ' + f.index + ' · VID ' + hex(f.vendor_id))))
+            el('li', null, el('span', null, f.label || 'Không có nhãn'), el('span', { class: 'muted small' }, 'fabric ' + f.index + ' · VID ' + hex(f.vendor_id)),
+              el('button', { class: 'btn danger small', type: 'button', onclick: () => removeFabric(f) }, 'Gỡ')))
         : [el('li', { class: 'muted' }, 'Chưa thuộc hệ sinh thái nào')]));
+    show('hm-remove-all', j.fabrics.length > 0);
   };
+
+  function removeFabric(f) {
+    const name = (f.label || 'không có nhãn') + ' (fabric ' + f.index + ', VID ' + hex(f.vendor_id) + ')';
+    if (!confirm('Cho ESP rời khỏi hệ sinh thái ' + name + '?\nỨng dụng nhà đó sẽ không điều khiển được thiết bị nữa cho tới khi thêm lại.')) return;
+    act('matter/fabric/remove', { index: f.index }, 'Đang rời khỏi hệ sinh thái');
+  }
+  $('hm-remove-all').addEventListener('click', () => {
+    if (!confirm('Cho ESP rời khỏi TẤT CẢ ứng dụng nhà?\nWi-Fi, cảm biến, profile IR và cài đặt được giữ nguyên. Chế độ ghép sẽ bật lại để thêm thiết bị từ đầu.')) return;
+    act('matter/fabric/remove', { all: 1 }, 'Đang rời khỏi tất cả ứng dụng nhà');
+  });
 
   $('hm-open').addEventListener('click', () => act('matter/window', { action: 'open', minutes: $('hm-minutes').value }, 'Đã mở cửa sổ ghép'));
   $('hm-close').addEventListener('click', () => act('matter/window', { action: 'close' }, 'Đã đóng cửa sổ ghép'));
@@ -940,6 +955,13 @@
       ['Sóng mang', ir.carrier_hz + ' Hz'], ['Đã phát', ir.sent], ['Lỗi', ir.failed], ['Trùng bị bỏ', ir.dropped_duplicate],
       ['Bị lệnh mới thay thế', ir.superseded], ['Lệnh cuối', ir.last_label], ['Lỗi cuối', ir.last_error || 'không'],
     ]);
+    const ota = j.ota;
+    otaMax = ota.max_size;
+    sensorBound = j.sensor_bound;
+    kv('dg-ota', [
+      ['Phiên bản đang chạy', fw.version + (ota.trial ? ' (đang chạy thử, chưa xác nhận)' : '')],
+      ['Khe đang chạy', ota.running || '-'], ['Khe sẽ ghi', ota.next ? ota.next + ' (tối đa ' + fmtBytes(ota.max_size) + ')' : 'không có'],
+    ]);
     $('dg-errors').replaceChildren(
       ...(j.errors.length
         ? j.errors.map((e) => el('li', null, el('span', null, '[' + e.module + '] ' + e.msg), el('span', { class: 'muted small' }, fmtAge(e.age_s))))
@@ -953,6 +975,65 @@
     }
   }
   $('dg-reboot').addEventListener('click', reboot);
+
+  $('dg-freset').addEventListener('click', async () => {
+    if (!confirm('ĐẶT LẠI GỐC?\nXóa Wi-Fi, mọi hệ sinh thái nhà, cảm biến đã ghép và toàn bộ cài đặt. Giữ lại mã ghép Matter và profile IR.\nKhông hoàn tác được.')) return;
+    const body = { confirm: 1 };
+    if (sensorBound) {
+      if (!confirm('Đang ghép một cảm biến. Nên gỡ cảm biến ở trang Cảm biến trước, nếu không cảm biến vẫn giữ fabric của ESP này (xóa được trong ứng dụng gốc của cảm biến).\nVẫn đặt lại gốc ngay?')) return;
+      body.force = 1;
+    }
+    if (await act('system/factory_reset', body, null)) {
+      closed = true;
+      clearTimeout(timer);
+      toast('Đang đặt lại gốc. Sau khoảng 20 giây, kết nối Wi-Fi cấu hình của thiết bị (mật khẩu mặc định) để thiết lập lại.');
+    }
+  });
+
+  /* Firmware update: the file is sent as the raw request body (XMLHttpRequest for upload progress). */
+  function otaMsg(msg, isErr) {
+    const e = $('ota-msg');
+    e.textContent = msg;
+    e.className = isErr ? 'err' : 'info';
+    e.hidden = !msg;
+  }
+  $('ota-start').addEventListener('click', () => {
+    if (uploading) return;
+    const f = $('ota-file').files[0];
+    if (!f) return otaMsg('Hãy chọn file firmware (.bin) trước.', true);
+    if (/_full_/.test(f.name)) return otaMsg('Đây là file full (chỉ nạp qua UART). Hãy chọn file ..._app_0x40000.bin.', true);
+    if (otaMax && f.size > otaMax) return otaMsg('File lớn hơn khe cập nhật (' + fmtBytes(otaMax) + ').', true);
+    if (!confirm('Cập nhật firmware bằng file ' + f.name + ' (' + fmtBytes(f.size) + ')?\nThiết bị sẽ khởi động lại sau khi ghi xong.')) return;
+    uploading = true;
+    clearTimeout(timer);
+    $('ota-start').disabled = true;
+    otaMsg('Đang tải lên: 0 %');
+    const done = (msg, isErr) => {
+      uploading = false;
+      $('ota-start').disabled = false;
+      otaMsg(msg, isErr);
+      if (isErr) schedule(500);
+    };
+    const x = new XMLHttpRequest();
+    x.open('POST', '/ota');
+    x.setRequestHeader('X-CSRF-Token', token);
+    x.setRequestHeader('Content-Type', 'application/octet-stream');
+    x.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) otaMsg(e.loaded < e.total ? 'Đang tải lên: ' + Math.floor((e.loaded * 100) / e.total) + ' %' : 'Đang kiểm tra và hoàn tất…');
+    });
+    x.addEventListener('load', () => {
+      let j = null;
+      try { j = JSON.parse(x.responseText); } catch (e) { j = null; }
+      if (x.status === 200 && j && j.ok) {
+        closed = true; /* the device restarts: stop polling */
+        done('Đã ghi firmware ' + j.version + '. Thiết bị đang khởi động lại; sau khoảng 20 giây hãy kết nối Wi-Fi cấu hình (tên mới có hậu tố v' + j.version + ') rồi tải lại trang.', false);
+      } else {
+        done((j && j.error) || 'Cập nhật thất bại (lỗi ' + x.status + ')', true);
+      }
+    });
+    x.addEventListener('error', () => done('Mất kết nối khi đang tải file. Kiểm tra Wi-Fi cấu hình rồi thử lại.', true));
+    x.send(f);
+  });
   $('ac-restart-btn').addEventListener('click', reboot);
 
   /* ------------------------------------------------------------------ header */

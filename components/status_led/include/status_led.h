@@ -5,6 +5,8 @@
  * N16R8 boards), a plain single-colour LED on a GPIO, or none.
  *
  * Indications, highest priority first:
+ *   RESET_NOW      factory reset in progress (BOOT held 20 s): steady RED
+ *   RESET_ARMED    BOOT held 10 s: fast blinking RED (release = leave all home apps)
  *   short events   paired: green 2 s / error: 3 fast red blinks (plain LED: same timing)
  *   PAIRING        Matter commissioning window open: blinking BLUE (0.4 s on / 0.4 s off)
  *   PORTAL         configuration SoftAP open: steady green (plain LED: steady on)
@@ -23,6 +25,8 @@ extern "C" {
 typedef enum {
     STATUS_LED_PORTAL = 1u << 0,
     STATUS_LED_PAIRING = 1u << 1,
+    STATUS_LED_RESET_ARMED = 1u << 2,
+    STATUS_LED_RESET_NOW = 1u << 3,
 } status_led_flag_t;
 
 typedef enum {

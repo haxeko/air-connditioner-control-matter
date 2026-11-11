@@ -1,5 +1,6 @@
 #include "config_store.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -26,13 +27,134 @@ static esp_err_t init_partition(const char *part)
     return err;
 }
 
+/* ------------------------------------------------------------------------------------------ */
+/* Factory reset                                                                                */
+/* ------------------------------------------------------------------------------------------ */
+
+#define RESET_NS "ac_sys" /* on CFG_PART_IR */
+#define RESET_KEY "freset"
+#define KEEP_MAX 8        /* entries of CFG_NS_IDENTITY carried over the erase */
+
+typedef struct {
+    char key[NVS_KEY_NAME_MAX_SIZE];
+    nvs_type_t type;
+    uint32_t u32;
+    void *blob;
+    size_t len;
+} kept_entry_t;
+
+static bool s_was_factory_reset;
+
+/* Read every u32 / blob entry of a namespace of the main partition. Returns the number kept. */
+static size_t keep_namespace(const char *ns, kept_entry_t *out, size_t max)
+{
+    size_t n = 0;
+    nvs_iterator_t it = NULL;
+    esp_err_t err = nvs_entry_find(CFG_PART_MAIN, ns, NVS_TYPE_ANY, &it);
+    while (err == ESP_OK && n < max) {
+        nvs_entry_info_t info;
+        nvs_entry_info(it, &info);
+        kept_entry_t *e = &out[n];
+        memset(e, 0, sizeof(*e));
+        strlcpy(e->key, info.key, sizeof(e->key));
+        e->type = info.type;
+        if (info.type == NVS_TYPE_U32) {
+            if (cfg_get_u32(CFG_PART_MAIN, ns, info.key, &e->u32) == ESP_OK) {
+                n++;
+            }
+        } else if (info.type == NVS_TYPE_BLOB) {
+            if (cfg_get_blob_size(CFG_PART_MAIN, ns, info.key, &e->len) == ESP_OK && e->len > 0 &&
+                (e->blob = malloc(e->len)) != NULL) {
+                if (cfg_get_blob(CFG_PART_MAIN, ns, info.key, e->blob, &e->len) == ESP_OK) {
+                    n++;
+                } else {
+                    free(e->blob);
+                }
+            }
+        }
+        err = nvs_entry_next(&it);
+    }
+    nvs_release_iterator(it);
+    return n;
+}
+
+static esp_err_t factory_reset_now(void)
+{
+    kept_entry_t *kept = calloc(KEEP_MAX, sizeof(kept_entry_t));
+    if (kept == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    size_t n = keep_namespace(CFG_NS_IDENTITY, kept, KEEP_MAX);
+    esp_err_t err = nvs_flash_deinit();
+    if (err == ESP_OK || err == ESP_ERR_NVS_NOT_INITIALIZED) {
+        err = nvs_flash_erase();
+    }
+    if (err == ESP_OK) {
+        err = nvs_flash_init();
+    }
+    if (err == ESP_OK) {
+        /* "ver" marks the identity as complete (device_identity.cpp): write it last. */
+        for (int pass = 0; pass < 2; pass++) {
+            for (size_t i = 0; i < n; i++) {
+                const kept_entry_t *e = &kept[i];
+                if ((strcmp(e->key, "ver") == 0) != (pass == 1)) {
+                    continue;
+                }
+                esp_err_t w = e->type == NVS_TYPE_U32 ? cfg_set_u32(CFG_PART_MAIN, CFG_NS_IDENTITY, e->key, e->u32)
+                                                      : cfg_set_blob(CFG_PART_MAIN, CFG_NS_IDENTITY, e->key, e->blob, e->len);
+                if (w != ESP_OK) {
+                    ESP_LOGE(TAG, "pairing code not kept (%s): a new one will be generated", esp_err_to_name(w));
+                    cfg_erase_namespace(CFG_PART_MAIN, CFG_NS_IDENTITY);
+                    pass = 2;
+                    break;
+                }
+            }
+        }
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (kept[i].blob != NULL) {
+            memset(kept[i].blob, 0, kept[i].len); /* salt / verifier */
+            free(kept[i].blob);
+        }
+    }
+    memset(kept, 0, KEEP_MAX * sizeof(kept_entry_t));
+    free(kept);
+    return err;
+}
+
+esp_err_t config_store_request_factory_reset(void)
+{
+    return cfg_set_u32(CFG_PART_IR, RESET_NS, RESET_KEY, 1);
+}
+
+bool config_store_was_factory_reset(void)
+{
+    return s_was_factory_reset;
+}
+
 esp_err_t config_store_init(void)
 {
     esp_err_t err = init_partition(CFG_PART_MAIN);
     if (err != ESP_OK) {
         return err;
     }
-    return init_partition(CFG_PART_IR);
+    err = init_partition(CFG_PART_IR);
+    if (err != ESP_OK) {
+        return err;
+    }
+    uint32_t requested = 0;
+    if (cfg_get_u32(CFG_PART_IR, RESET_NS, RESET_KEY, &requested) == ESP_OK && requested == 1) {
+        ESP_LOGW(TAG, "factory reset requested: erasing Wi-Fi, Matter fabrics, sensor and settings");
+        err = factory_reset_now();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "factory reset failed: %s", esp_err_to_name(err));
+            return err; /* the request stays: tried again at the next start */
+        }
+        cfg_erase_key(CFG_PART_IR, RESET_NS, RESET_KEY);
+        s_was_factory_reset = true;
+        ESP_LOGW(TAG, "factory reset done (pairing code and IR profiles kept)");
+    }
+    return ESP_OK;
 }
 
 static esp_err_t open_ns(const char *part, const char *ns, nvs_open_mode_t mode, nvs_handle_t *out)

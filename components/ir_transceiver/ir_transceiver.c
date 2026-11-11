@@ -51,7 +51,7 @@ static rmt_encoder_handle_t s_copy_encoder;
 
 static DRAM_ATTR rmt_symbol_word_t s_rx_chunk[RX_CHUNK_SYMBOLS];
 static DRAM_ATTR rmt_receive_config_t s_rx_cfg;
-static rmt_symbol_word_t *s_sym_store;      /* = s_buf_store while the receiver runs, else NULL */
+static rmt_symbol_word_t *s_sym_store;      /* = s_buf_store from init on; never changes afterwards */
 static volatile DRAM_ATTR uint32_t s_sym_write;
 static volatile DRAM_ATTR uint32_t s_seg_start;
 static volatile DRAM_ATTR bool s_seg_overflow;
@@ -184,7 +184,10 @@ static void rx_stop(void)
 {
     s_rx_armed = false;
     rmt_disable(s_rx); /* aborts a pending receive; ESP_ERR_INVALID_STATE when already off */
-    s_sym_store = NULL;
+    /* rmt_disable() does not wait for an RX-done interrupt that is already running on the other
+     * core: let it finish before the store and its counters are reused. The store pointer itself is
+     * never cleared, so such an interrupt always writes into valid memory. */
+    vTaskDelay(pdMS_TO_TICKS(2));
 }
 
 /* Arm the receiver with an empty symbol store and segment queue. */
@@ -194,7 +197,6 @@ static esp_err_t rx_start(void)
     s_sym_write = 0;
     s_seg_start = 0;
     s_seg_overflow = false;
-    s_sym_store = s_buf_store;
     esp_err_t err = rmt_enable(s_rx);
     if (err == ESP_OK) {
         s_rx_armed = true;
@@ -663,6 +665,7 @@ esp_err_t ir_transceiver_init(void)
         ESP_LOGE(TAG, "no memory for the IR capture buffers");
         return ESP_ERR_NO_MEM;
     }
+    s_sym_store = s_buf_store; /* the ISR checks it for NULL: set once, before the channel exists */
     s_rx_cfg.signal_range_min_ns = CONFIG_APP_IR_RX_GLITCH_NS;
     s_rx_cfg.signal_range_max_ns = CONFIG_APP_IR_RX_IDLE_US * 1000u;
     s_rx_cfg.flags.en_partial_rx = 1;

@@ -56,8 +56,8 @@ typedef struct {
     uint8_t version;
     uint8_t fan;
     uint8_t swing;
-    uint8_t has_sent;
-    ac_state_t last_desired;
+    uint8_t has_sent;        /* last_desired is valid */
+    ac_state_t last_desired; /* state the AC was last put in (climate_link_t.actual) */
 } runtime_blob_t;
 
 static QueueHandle_t s_queue;
@@ -67,8 +67,7 @@ static climate_status_t s_status;
 static app_config_t s_cfg;
 static climate_algo_t s_algo;
 static climate_params_t s_params;
-static ac_state_t s_last_desired_sent;
-static bool s_has_desired_sent;
+static climate_link_t s_link;      /* what is known about the state of the AC */
 static int64_t s_send_at_ms;      /* 0 = nothing scheduled */
 static bool s_force_next;
 static int64_t s_persist_at_ms;
@@ -110,8 +109,8 @@ static void persist_runtime(void)
         .version = 1,
         .fan = s_status.fan,
         .swing = s_status.swing,
-        .has_sent = s_has_desired_sent ? 1 : 0,
-        .last_desired = s_last_desired_sent,
+        .has_sent = s_link.has_actual ? 1 : 0,
+        .last_desired = s_link.actual,
     };
     cfg_set_blob(CFG_PART_MAIN, CFG_NS_RUNTIME, "climate", &b, sizeof(b));
 }
@@ -123,8 +122,7 @@ static void load_runtime(void)
     if (cfg_get_blob(CFG_PART_MAIN, CFG_NS_RUNTIME, "climate", &b, &len) == ESP_OK && len == sizeof(b) && b.version == 1) {
         s_status.fan = b.fan < AC_FAN_COUNT ? b.fan : AC_FAN_AUTO;
         s_status.swing = b.swing < AC_SWING_COUNT ? b.swing : AC_SWING_OFF;
-        s_has_desired_sent = b.has_sent && ac_state_valid(&b.last_desired);
-        s_last_desired_sent = b.last_desired;
+        climate_link_restore(&s_link, b.has_sent != 0, &b.last_desired);
     } else {
         ac_profile_meta_t meta;
         if (ac_profiles_get_meta(ac_profiles_active_slot(), &meta) == ESP_OK) {
@@ -201,8 +199,8 @@ static void transmit(const climate_output_t *out, bool force)
     ac_resolve_kind_t kind = AC_RESOLVE_NONE;
     uint8_t *blob = NULL;
     size_t len = 0;
-    esp_err_t err = ac_profiles_build_command(&out->desired, s_has_desired_sent ? &s_last_desired_sent : NULL,
-                                              out->user_target_half, &chosen, &kind, &blob, &len);
+    esp_err_t err = ac_profiles_build_command(&out->desired, climate_link_prev(&s_link), out->user_target_half, &chosen,
+                                              &kind, &blob, &len);
     if (err != ESP_OK) {
         char desc[64]; /* + 24 byte prefix fits last_error[96] */
         ac_state_describe(&out->desired, desc, sizeof(desc));
@@ -210,9 +208,7 @@ static void transmit(const climate_output_t *out, bool force)
         snprintf(s_status.last_error, sizeof(s_status.last_error), "Chưa học lệnh cho: %s", desc);
         xSemaphoreGive(s_lock);
         app_log_error("climate", "no learned command for %s (%s)", desc, esp_err_to_name(err));
-        /* Do not retry the same impossible state on every tick. */
-        s_last_desired_sent = out->desired;
-        s_has_desired_sent = true;
+        climate_link_skip(&s_link, &out->desired); /* not again on every tick */
         return;
     }
     char label[64];
@@ -231,8 +227,7 @@ static void transmit(const climate_output_t *out, bool force)
     }
     xSemaphoreGive(s_lock);
     if (err == ESP_OK) {
-        s_last_desired_sent = out->desired;
-        s_has_desired_sent = true;
+        climate_link_confirm(&s_link, &out->desired, &chosen);
         s_persist_at_ms = now_ms() + PERSIST_DELAY_MS;
     }
 }
@@ -242,11 +237,12 @@ static void schedule(bool user_origin)
 {
     climate_output_t out;
     evaluate(&out);
-    if (!s_status.ready) {
-        s_send_at_ms = 0; /* nothing is transmitted until a locked profile exists */
+    if (!s_status.ready || !s_link.user_known) {
+        /* nothing is transmitted until a locked profile exists and the thermostat reported its state */
+        s_send_at_ms = 0;
         return;
     }
-    bool changed = !s_has_desired_sent || !ac_state_equal(&out.desired, &s_last_desired_sent);
+    bool changed = climate_link_needs_send(&s_link, &out.desired, false);
     if (!changed && !s_force_next) {
         if (user_origin && s_send_at_ms != 0) {
             s_send_at_ms = 0; /* user reverted to the already sent state within the debounce */
@@ -334,8 +330,7 @@ static void handle_remote(const uint8_t *blob, size_t len)
     climate_algo_note_remote(&s_algo, now_ms());
     climate_output_t out;
     evaluate(&out);
-    s_last_desired_sent = out.desired;
-    s_has_desired_sent = true;
+    climate_link_confirm(&s_link, &out.desired, &rs);
     s_send_at_ms = 0;     /* the remote wins over a change still waiting for its debounce */
     s_force_next = false;
     s_persist_at_ms = now_ms() + PERSIST_DELAY_MS;
@@ -365,13 +360,14 @@ static void handle_event(const event_t *ev)
         xSemaphoreGive(s_lock);
         climate_algo_note_user_change(&s_algo, now_ms());
         if (ev->user.mask & CLIMATE_USER_BOOT) {
-            /* boot: restore without transmitting unless the user asked for it */
+            /* Boot: the thermostat state is restored without transmitting (whatever was stored as
+             * "last sent"), unless the user asked for a re-send after power-up. */
+            climate_output_t out;
+            evaluate(&out);
+            climate_link_boot(&s_link, &out.desired);
             if (s_cfg.resend_on_boot) {
                 s_force_next = true;
                 s_send_at_ms = now_ms() + BOOT_RESEND_DELAY_MS;
-            } else {
-                climate_output_t out;
-                evaluate(&out);
             }
             break;
         }
@@ -404,10 +400,15 @@ static void handle_event(const event_t *ev)
         break;
     case EV_PROFILE:
         refresh_params();
-        s_has_desired_sent = false; /* new profile: the AC state is unknown */
         {
+            /* Another profile (or its lock) changed: the state of the AC is unknown. It is assumed to
+             * match the thermostat, so nothing is transmitted until the user, the original remote or
+             * the compensation changes something. */
             climate_output_t out;
             evaluate(&out);
+            climate_link_assume(&s_link, &out.desired);
+            s_send_at_ms = 0;
+            s_force_next = false;
         }
         break;
     case EV_FORCE:
@@ -451,7 +452,7 @@ static void task(void *arg)
             evaluate(&out);
             bool force = s_force_next;
             s_force_next = false;
-            if (force || !s_has_desired_sent || !ac_state_equal(&out.desired, &s_last_desired_sent)) {
+            if (climate_link_needs_send(&s_link, &out.desired, force)) {
                 transmit(&out, force);
             }
         }
@@ -477,6 +478,7 @@ esp_err_t climate_control_start(const app_config_t *cfg)
     }
     s_cfg = *cfg;
     climate_algo_init(&s_algo);
+    climate_link_init(&s_link);
     memset(&s_status, 0, sizeof(s_status));
     s_status.cool_target_centi = 2600;
     s_status.heat_target_centi = 2400;

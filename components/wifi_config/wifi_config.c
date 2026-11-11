@@ -290,6 +290,26 @@ esp_err_t wifi_config_start(wifi_portal_hook_t hook)
     }
     s_started = true;
 
+    /* A Wi-Fi change whose connection test was cut short by a reboot or a power cut: the new
+     * credentials are already stored but were never confirmed. Go back to the network that worked,
+     * exactly as the test's timeout would have done, and do not keep the old password around. */
+    wifi_creds_t prev;
+    size_t prev_len = sizeof(prev);
+    if (cfg_get_blob(CFG_PART_MAIN, CFG_NS_WIFI, "prev", &prev, &prev_len) == ESP_OK) {
+        prev.ssid[sizeof(prev.ssid) - 1] = 0;
+        prev.password[sizeof(prev.password) - 1] = 0;
+        if (prev_len == sizeof(prev) && prev.ssid[0] != 0) {
+            esp_err_t rb = wifi_chip_connect_sta(prev.ssid, prev.password);
+            if (rb == ESP_OK) {
+                app_log_error("wifi", "Đổi Wi-Fi bị ngắt giữa chừng: đã quay về mạng cũ");
+            } else {
+                app_log_error("wifi", "Quay về mạng Wi-Fi cũ thất bại: %s", esp_err_to_name(rb));
+            }
+        }
+        cfg_erase_key(CFG_PART_MAIN, CFG_NS_WIFI, "prev");
+    }
+    memset(&prev, 0, sizeof(prev));
+
     wifi_config_t sta;
     bool provisioned = esp_wifi_get_config(WIFI_IF_STA, &sta) == ESP_OK && sta.sta.ssid[0] != 0;
     if (!provisioned) {

@@ -271,6 +271,65 @@ void climate_user_from_remote(const ac_state_t *remote, const climate_offer_t *o
     res->fan = true;
 }
 
+void climate_link_init(climate_link_t *l)
+{
+    memset(l, 0, sizeof(*l));
+}
+
+void climate_link_restore(climate_link_t *l, bool has_actual, const ac_state_t *actual)
+{
+    if (has_actual && actual != NULL && ac_state_valid(actual)) {
+        l->actual = *actual;
+        l->has_actual = true;
+        l->ref = *actual;
+        l->has_ref = true;
+    }
+}
+
+void climate_link_assume(climate_link_t *l, const ac_state_t *desired)
+{
+    l->ref = *desired;
+    l->has_ref = true;
+    l->has_actual = false;
+}
+
+void climate_link_boot(climate_link_t *l, const ac_state_t *desired)
+{
+    l->user_known = true;
+    if (!l->has_ref || !ac_state_equal(&l->ref, desired)) {
+        /* `actual` stays: unless somebody touched the AC it is still in the state sent last */
+        l->ref = *desired;
+        l->has_ref = true;
+    }
+}
+
+void climate_link_confirm(climate_link_t *l, const ac_state_t *desired, const ac_state_t *actual)
+{
+    l->ref = *desired;
+    l->has_ref = true;
+    l->actual = *actual;
+    l->has_actual = true;
+}
+
+void climate_link_skip(climate_link_t *l, const ac_state_t *desired)
+{
+    l->ref = *desired;
+    l->has_ref = true;
+}
+
+bool climate_link_needs_send(const climate_link_t *l, const ac_state_t *desired, bool force)
+{
+    if (!l->user_known) {
+        return false;
+    }
+    return force || !l->has_ref || !ac_state_equal(&l->ref, desired);
+}
+
+const ac_state_t *climate_link_prev(const climate_link_t *l)
+{
+    return l->has_actual ? &l->actual : NULL;
+}
+
 const char *climate_reason_text(climate_reason_t r)
 {
     switch (r) {

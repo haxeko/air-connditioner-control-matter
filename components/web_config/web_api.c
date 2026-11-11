@@ -21,6 +21,7 @@
 #include "esp_flash.h"
 #include "esp_heap_caps.h"
 #include "esp_mac.h"
+#include "esp_ota_ops.h"
 #include "esp_psram.h"
 #include "esp_system.h"
 #include "ir_transceiver.h"
@@ -503,6 +504,40 @@ static void get_matter(api_ctx_t *c)
     }
     wj_arr_end(c->w);
     wj_uint(c->w, "window_max_s", CONFIG_APP_COMMISSIONING_WINDOW_S);
+}
+
+/* Leave one home ecosystem (index=<fabric index>) or all of them (all=1) on the device side. */
+static void post_matter_fabric_remove(api_ctx_t *c)
+{
+    const bool all = form_get_bool(c->body, "all", false);
+    esp_err_t err;
+    if (all) {
+        err = matter_thermostat_remove_all_home_fabrics();
+    } else {
+        long index = 0;
+        if (!form_get_int(c->body, "index", 1, 254, &index)) {
+            api_fail(c, 400, "Thiếu hệ sinh thái cần gỡ");
+            return;
+        }
+        matter_fabric_info_t fabrics[CONFIG_MAX_FABRICS];
+        size_t n = matter_thermostat_list_home_fabrics(fabrics, sizeof(fabrics) / sizeof(fabrics[0]));
+        bool found = false;
+        for (size_t i = 0; i < n; i++) {
+            found = found || fabrics[i].fabric_index == (uint8_t)index;
+        }
+        if (!found) {
+            api_fail(c, 404, "Hệ sinh thái này không còn trên thiết bị");
+            return;
+        }
+        err = matter_thermostat_remove_home_fabric((uint8_t)index);
+    }
+    if (err != ESP_OK) {
+        api_fail(c, 503, "Không gỡ được: %s", esp_err_to_name(err));
+        return;
+    }
+    wj_str(c->w, "message",
+           all ? "Đang rời khỏi tất cả ứng dụng nhà. Chế độ ghép sẽ tự bật lại"
+               : "Đang rời khỏi ứng dụng nhà đã chọn");
 }
 
 #define QR_MAX_SIDE 57 /* version 10 */
@@ -1643,6 +1678,22 @@ static void get_diag(api_ctx_t *c)
     wj_bool(w, "test_mode", TEST_MODE);
     wj_obj_end(w);
 
+    /* firmware update slots */
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
+    esp_ota_img_states_t ota_state = ESP_OTA_IMG_UNDEFINED;
+    if (running != NULL) {
+        esp_ota_get_state_partition(running, &ota_state);
+    }
+    wj_obj_begin(w, "ota");
+    wj_str(w, "running", running ? running->label : "");
+    wj_str(w, "next", next ? next->label : "");
+    wj_uint(w, "max_size", next ? next->size : 0);
+    wj_bool(w, "trial", ota_state == ESP_OTA_IMG_PENDING_VERIFY);
+    wj_obj_end(w);
+    sensor_binding_t binding;
+    wj_bool(w, "sensor_bound", remote_temperature_get_binding(&binding));
+
     esp_chip_info_t chip;
     esp_chip_info(&chip);
     uint32_t flash = 0;
@@ -1697,6 +1748,29 @@ static void get_diag(api_ctx_t *c)
     wj_arr_end(w);
 }
 
+/* confirm=1; force=1 when a sensor is still paired (it then keeps this device's fabric). */
+static void post_system_factory_reset(api_ctx_t *c)
+{
+    if (!form_get_bool(c->body, "confirm", false)) {
+        api_fail(c, 400, "Thiếu xác nhận đặt lại gốc");
+        return;
+    }
+    if (app_state_get_busy() != 0) {
+        api_fail(c, 409, "Thiết bị đang bận (ghép cảm biến, học IR, đổi Wi-Fi hoặc cập nhật): hãy chờ xong");
+        return;
+    }
+    sensor_binding_t b;
+    if (remote_temperature_get_binding(&b) && !form_get_bool(c->body, "force", false)) {
+        api_fail(c, 409, "Đang ghép một cảm biến: hãy gỡ cảm biến ở trang Cảm biến trước");
+        return;
+    }
+    if (web_defer(WEB_DEFER_FACTORY_RESET, 0, 1000) != ESP_OK) {
+        api_fail(c, 503, "Không thể đặt lại gốc lúc này");
+        return;
+    }
+    wj_str(c->w, "message", "Đang đặt lại gốc, thiết bị sẽ khởi động lại...");
+}
+
 static void post_system_reboot(api_ctx_t *c)
 {
     if (app_state_get_busy() & (APP_BUSY_PAIRING | APP_BUSY_IR_LEARNING)) {
@@ -1724,6 +1798,7 @@ const api_route_t g_api_routes[] = {
     { "matter", get_matter, NULL },
     { "matter/onboarding", get_matter_onboarding, NULL },
     { "matter/window", NULL, post_matter_window },
+    { "matter/fabric/remove", NULL, post_matter_fabric_remove },
     { "sensor", get_sensor, NULL },
     { "sensor/pair", NULL, post_sensor_pair },
     { "sensor/cancel", NULL, post_sensor_cancel },
@@ -1754,6 +1829,7 @@ const api_route_t g_api_routes[] = {
     { "config", get_config, post_config },
     { "diag", get_diag, NULL },
     { "system/reboot", NULL, post_system_reboot },
+    { "system/factory_reset", NULL, post_system_factory_reset },
 };
 
 const size_t g_api_route_count = sizeof(g_api_routes) / sizeof(g_api_routes[0]);

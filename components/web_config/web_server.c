@@ -7,9 +7,12 @@
 #include <strings.h>
 
 #include "app_state.h"
+#include "esp_app_desc.h"
+#include "esp_app_format.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_random.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
@@ -397,6 +400,195 @@ static esp_err_t static_handler(httpd_req_t *req)
 }
 
 /* ------------------------------------------------------------------------------------------ */
+/* Firmware update: POST /ota, body = application image (ac_matter_ir_vX.Y.Z_app_0x40000.bin)    */
+/* ------------------------------------------------------------------------------------------ */
+
+#define OTA_CHUNK 4096
+#define OTA_HEADER_LEN (sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t))
+#define OTA_MIN_SIZE (128u * 1024u)
+#define OTA_DRAIN_MAX (8u * 1024u * 1024u) /* a refused upload larger than this is cut instead of read */
+
+_Static_assert(OTA_HEADER_LEN <= OTA_CHUNK, "the image header must fit the first chunk");
+
+/* Read until at least `min` bytes are in buf. Returns the number read, or -1 when the peer is gone. */
+static int ota_recv(httpd_req_t *req, char *buf, size_t want, size_t min)
+{
+    size_t have = 0;
+    int timeouts = 0;
+    while (have < min) {
+        int r = httpd_req_recv(req, buf + have, want - have);
+        if (r == HTTPD_SOCK_ERR_TIMEOUT && ++timeouts <= 3) {
+            continue;
+        }
+        if (r <= 0) {
+            return -1;
+        }
+        have += (size_t)r;
+    }
+    return (int)have;
+}
+
+/* Swallow the rest of a refused upload: browsers read the answer only after sending the body. */
+static bool ota_drain(httpd_req_t *req, char *buf, size_t left)
+{
+    if (left > OTA_DRAIN_MAX) {
+        return false;
+    }
+    while (left > 0) {
+        int r = ota_recv(req, buf, left < OTA_CHUNK ? left : OTA_CHUNK, 1);
+        if (r <= 0) {
+            return false;
+        }
+        left -= (size_t)r;
+    }
+    return true;
+}
+
+/* First OTA_HEADER_LEN bytes of the file: an application image of this project for this chip?
+ * (The "full" file starts with the bootloader image, whose description has another magic.) */
+static const char *ota_check_image(const char *buf, char *version, size_t version_len)
+{
+    esp_image_header_t ih;
+    esp_app_desc_t desc;
+    memcpy(&ih, buf, sizeof(ih));
+    memcpy(&desc, buf + sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t), sizeof(desc));
+    if (ih.magic != ESP_IMAGE_HEADER_MAGIC || desc.magic_word != ESP_APP_DESC_MAGIC_WORD) {
+        return "Không phải file firmware ứng dụng: hãy chọn file ..._app_0x40000.bin (không phải file full)";
+    }
+    if (ih.chip_id != CONFIG_IDF_FIRMWARE_CHIP_ID) {
+        return "Firmware này không dành cho chip của thiết bị (ESP32-S3)";
+    }
+    const esp_app_desc_t *me = esp_app_get_description();
+    if (strncmp(desc.project_name, me->project_name, sizeof(desc.project_name)) != 0) {
+        return "File không phải firmware của thiết bị này";
+    }
+    desc.version[sizeof(desc.version) - 1] = 0;
+    strlcpy(version, desc.version, version_len);
+    return NULL;
+}
+
+static esp_err_t ota_handler(httpd_req_t *req)
+{
+    const char *why = NULL;
+    int deny = check_request(req, true, false, &why);
+    if (deny != 0) {
+        return send_error(req, deny, why);
+    }
+    char ct[48];
+    if (!header(req, "Content-Type", ct, sizeof(ct)) || strncasecmp(ct, "application/octet-stream", 24) != 0) {
+        return send_error(req, 400, "Content-Type không được hỗ trợ");
+    }
+    wifi_config_touch();
+
+    const size_t total = req->content_len;
+    const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
+    char *buf = malloc(OTA_CHUNK);
+    if (buf == NULL) {
+        return send_error(req, 503, "Hết bộ nhớ");
+    }
+    const char *msg = NULL;
+    int status = 400;
+    if (part == NULL) {
+        msg = "Bảng phân vùng không có chỗ cho bản cập nhật";
+        status = 500;
+    } else if (app_state_get_busy() != 0) {
+        msg = "Thiết bị đang bận (ghép cảm biến, học IR, đổi Wi-Fi hoặc đang cập nhật): hãy chờ xong";
+        status = 409;
+    } else if (total < OTA_MIN_SIZE || total > part->size) {
+        msg = "Kích thước file không hợp lệ cho phân vùng cập nhật";
+        status = 413;
+    }
+    if (msg != NULL) {
+        bool answered = ota_drain(req, buf, total);
+        free(buf);
+        return answered ? send_error(req, status, msg) : ESP_FAIL;
+    }
+
+    app_state_set_busy(APP_BUSY_OTA, true);
+    esp_ota_handle_t handle = 0;
+    bool begun = false;
+    bool peer_gone = false;
+    size_t got = 0;
+    char version[33] = "";
+    esp_err_t err = ESP_OK;
+    while (got < total) {
+        size_t want = total - got < OTA_CHUNK ? total - got : OTA_CHUNK;
+        int r = ota_recv(req, buf, want, got == 0 ? OTA_HEADER_LEN : 1);
+        if (r <= 0) {
+            peer_gone = true;
+            msg = "Mất kết nối khi đang tải file";
+            break;
+        }
+        if (got == 0) {
+            msg = ota_check_image(buf, version, sizeof(version));
+            if (msg == NULL) {
+                /* sectors are erased as the image is written: no long pause before the first byte */
+                err = esp_ota_begin(part, OTA_WITH_SEQUENTIAL_WRITES, &handle);
+                begun = err == ESP_OK;
+                if (err == ESP_ERR_OTA_ROLLBACK_INVALID_STATE) {
+                    msg = "Firmware vừa cập nhật còn đang chạy thử: hãy thử lại sau 1 phút";
+                } else if (err != ESP_OK) {
+                    msg = "Không mở được phân vùng cập nhật";
+                }
+            }
+        }
+        if (msg == NULL) {
+            err = esp_ota_write(handle, buf, (size_t)r);
+            if (err != ESP_OK) {
+                msg = "Ghi flash thất bại";
+            }
+        }
+        got += (size_t)r;
+        if (msg != NULL) {
+            break;
+        }
+        if ((got % (256u * 1024u)) < OTA_CHUNK) {
+            wifi_config_touch(); /* a slow upload is activity: keep the portal open */
+        }
+    }
+    if (msg == NULL) {
+        err = esp_ota_end(handle); /* checks the image (segments, checksum, SHA-256) */
+        begun = false;
+        if (err == ESP_ERR_OTA_VALIDATE_FAILED) {
+            msg = "File hỏng hoặc không đầy đủ (kiểm tra nội dung thất bại): tải lại file rồi thử lại";
+        } else if (err != ESP_OK) {
+            msg = "Không hoàn tất được bản cập nhật";
+        } else if ((err = esp_ota_set_boot_partition(part)) != ESP_OK) {
+            msg = "Không chọn được firmware mới để khởi động";
+        }
+    }
+    if (begun) {
+        esp_ota_abort(handle);
+    }
+    app_state_set_busy(APP_BUSY_OTA, false);
+
+    if (msg != NULL) {
+        app_log_error("ota", "update refused after %u of %u bytes (%s)", (unsigned)got, (unsigned)total,
+                      esp_err_to_name(err));
+        bool answered = !peer_gone && ota_drain(req, buf, total - got);
+        free(buf);
+        return answered ? send_error(req, 400, msg) : ESP_FAIL;
+    }
+    free(buf);
+    ESP_LOGW(TAG, "firmware %s written to %s (%u bytes): restarting", version, part->label, (unsigned)total);
+
+    char out[320];
+    wj_t w;
+    wj_init(&w, out, sizeof(out));
+    wj_obj_begin(&w, NULL);
+    wj_bool(&w, "ok", true);
+    wj_str(&w, "version", version);
+    wj_str(&w, "message", "Đã ghi firmware mới. Thiết bị đang khởi động lại...");
+    wj_obj_end(&w);
+    const char *json = wj_finish(&w);
+    common_headers(req);
+    httpd_resp_set_type(req, "application/json; charset=utf-8");
+    esp_err_t sent = httpd_resp_send(req, json ? json : "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
+    web_defer(WEB_DEFER_REBOOT, 0, 2000);
+    return sent;
+}
+
+/* ------------------------------------------------------------------------------------------ */
 /* Deferred actions                                                                             */
 /* ------------------------------------------------------------------------------------------ */
 
@@ -430,6 +622,10 @@ static void defer_task(void *arg)
             }
             break;
         }
+        case WEB_DEFER_FACTORY_RESET:
+            ESP_LOGW(TAG, "factory reset requested from the configuration portal");
+            app_factory_reset(); /* restarts the device */
+            break;
         }
     }
 }
@@ -475,7 +671,7 @@ esp_err_t web_config_start(void)
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size = 8192;
     cfg.max_open_sockets = 4;
-    cfg.max_uri_handlers = 4;
+    cfg.max_uri_handlers = 6;
     cfg.max_resp_headers = 10;
     cfg.lru_purge_enable = true;
     cfg.recv_wait_timeout = 10;
@@ -490,9 +686,11 @@ esp_err_t web_config_start(void)
     }
     const httpd_uri_t api_get = { .uri = "/api/*", .method = HTTP_GET, .handler = api_handler };
     const httpd_uri_t api_post = { .uri = "/api/*", .method = HTTP_POST, .handler = api_handler };
+    const httpd_uri_t ota = { .uri = "/ota", .method = HTTP_POST, .handler = ota_handler };
     const httpd_uri_t files = { .uri = "/*", .method = HTTP_GET, .handler = static_handler };
     httpd_register_uri_handler(s_server, &api_get);
     httpd_register_uri_handler(s_server, &api_post);
+    httpd_register_uri_handler(s_server, &ota);
     httpd_register_uri_handler(s_server, &files);
     ESP_LOGI(TAG, "configuration web server started (SoftAP interface only)");
     return ESP_OK;

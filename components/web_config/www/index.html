@@ -172,7 +172,9 @@
     <div class="card">
       <h2>Hệ sinh thái đã ghép (Fabric A)</h2>
       <ul id="hm-fabrics" class="list"></ul>
-      <p class="note">Danh sách không gồm fabric riêng mà ESP dùng để đọc cảm biến. Muốn gỡ thermostat khỏi một hệ sinh thái, hãy xóa thiết bị trong ứng dụng đó. Thermostat chỉ hỗ trợ Tắt/Làm lạnh (và Sưởi/Khô/Quạt nếu profile đã học), không báo trạng thái máy nén vì IR là điều khiển một chiều.</p>
+      <div class="row"><button id="hm-remove-all" class="btn danger" type="button">Rời khỏi tất cả ứng dụng nhà</button></div>
+      <p class="note">Cách gỡ bình thường là xóa thiết bị trong ứng dụng nhà. Nút <b>Gỡ</b> ở đây dùng khi ứng dụng/hub đó không còn nữa hoặc đã xóa thiết bị lúc ESP mất mạng: ESP tự rời khỏi hệ sinh thái, còn ứng dụng (nếu vẫn tồn tại) sẽ hiện thiết bị “không phản hồi” và phải xóa tay. Wi-Fi, cảm biến, profile IR và cài đặt được giữ nguyên; hết hệ sinh thái thì chế độ ghép tự bật lại. Cũng làm được bằng nút: <b>giữ BOOT 10 giây</b> (LED nháy đỏ nhanh) rồi thả.</p>
+      <p class="note">Danh sách không gồm fabric riêng mà ESP dùng để đọc cảm biến. Thermostat chỉ hỗ trợ Tắt/Làm lạnh (và Sưởi/Khô/Quạt nếu profile đã học), không báo trạng thái máy nén vì IR là điều khiển một chiều.</p>
     </div>
   </div>
 </section>
@@ -464,9 +466,19 @@
       <ul id="dg-errors" class="list"></ul>
     </div>
     <div class="card">
+      <h2>Cập nhật firmware</h2>
+      <dl class="kv" id="dg-ota"></dl>
+      <p class="note">Chọn file <b>ac_matter_ir_vX.Y.Z_app_0x40000.bin</b> (file app, không phải file full). Wi-Fi, mã ghép, hệ sinh thái, cảm biến, profile IR và cài đặt được giữ nguyên. Sau khi cập nhật, tên Wi-Fi cấu hình đổi theo phiên bản mới. Firmware mới chạy thử 60 giây: nếu thiết bị khởi động lại trong thời gian đó thì tự quay về bản cũ (cần bootloader từ v1.5.0: bo nạp lần đầu bằng bản cũ hơn thì nạp thêm file bootloader qua UART một lần).</p>
+      <div class="row"><input id="ota-file" type="file" accept=".bin,application/octet-stream" aria-label="File firmware"></div>
+      <div class="row"><button id="ota-start" class="btn primary" type="button">Tải lên và cập nhật</button></div>
+      <div id="ota-msg" class="info" hidden></div>
+    </div>
+    <div class="card">
       <h2>Hệ thống</h2>
-      <p class="note">Khởi động lại không xóa cấu hình, fabric, cảm biến hay profile IR. Firmware không có chức năng factory reset qua nút bấm.</p>
+      <p class="note">Khởi động lại không xóa cấu hình, hệ sinh thái, cảm biến hay profile IR.</p>
       <div class="row"><button id="dg-reboot" class="btn danger" type="button">Khởi động lại</button></div>
+      <p class="note"><b>Đặt lại gốc</b> xóa Wi-Fi, mọi hệ sinh thái nhà, cảm biến đã ghép và toàn bộ cài đặt (mật khẩu Wi-Fi cấu hình về mặc định). Giữ lại: mã ghép Matter (QR/mã số) và profile IR. Cũng làm được bằng nút: <b>giữ BOOT 20 giây</b> cho tới khi LED đỏ sáng liên tục.</p>
+      <div class="row"><button id="dg-freset" class="btn danger" type="button">Đặt lại gốc</button></div>
     </div>
   </div>
 </section>

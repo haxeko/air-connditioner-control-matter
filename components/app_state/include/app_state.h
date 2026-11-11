@@ -32,6 +32,7 @@ typedef enum {
     APP_BUSY_IR_LEARNING = 1u << 1,  /* waiting for / capturing a remote  */
     APP_BUSY_SENSOR_READ = 1u << 2,  /* endpoint discovery / test read    */
     APP_BUSY_WIFI_CONNECT = 1u << 3, /* testing new station credentials   */
+    APP_BUSY_OTA = 1u << 4,          /* a firmware file is being written  */
 } app_busy_t;
 
 void app_state_init(void);
@@ -45,6 +46,13 @@ uint32_t app_get_error_count(void);
 
 void app_state_set_busy(uint32_t flags, bool on);
 uint32_t app_state_get_busy(void);
+
+/**
+ * Factory reset, implemented by the application (main/app_main.cpp): leaves the home ecosystems,
+ * stores the request (config_store_request_factory_reset) and restarts after about 2.5 s; everything
+ * is erased at the next start. Does not return on success. Not from the CHIP task.
+ */
+void app_factory_reset(void);
 
 /** Microseconds since boot (esp_timer). */
 int64_t app_time_us(void);

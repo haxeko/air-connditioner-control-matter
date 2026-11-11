@@ -22,6 +22,14 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
 # ---------------------------------------------------------------------------
+# Firmware update from the configuration portal (two OTA slots, see partitions.csv).
+# A new firmware starts on trial: if it resets before the application confirms it (60 s after
+# start, main/app_main.cpp), the bootloader goes back to the previous one. Needs this bootloader:
+# devices upgraded with the app file only keep their old bootloader and update without rollback.
+# ---------------------------------------------------------------------------
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# ---------------------------------------------------------------------------
 # Matter: server (thermostat) + commissioner on the same CHIP stack
 # ---------------------------------------------------------------------------
 CONFIG_ESP_MATTER_ENABLE_MATTER_SERVER=y

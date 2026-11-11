@@ -11,6 +11,18 @@ function check(cond, what) {
   console.log('  ok  ' + what);
 }
 
+/* Minimal application image as the device checks it: esp_image_header_t magic, esp_app_desc_t magic,
+ * version and project name; padded to a plausible size. */
+function fwImage(project, version) {
+  const b = Buffer.alloc(200 * 1024, 0xff);
+  b[0] = 0xe9;
+  b.writeUInt32LE(0xabcd5432, 32);
+  b.fill(0, 36, 112);
+  b.write(version, 48, 'ascii');
+  b.write(project, 80, 'ascii');
+  return b;
+}
+
 (async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: 'vi-VN' });
@@ -67,6 +79,11 @@ function check(cond, what) {
     check((await txt('#hm-ble')).startsWith('đang phát'), 'BLE advertising while the window is open');
     check((await page.locator('#hm-print').isVisible()), 'printable pairing label offered');
     check(true, 'commissioning window opened');
+    check((await page.locator('#hm-fabrics li').count()) === 2, 'two home ecosystems listed');
+    await page.click('#hm-fabrics li:nth-child(2) button');
+    await page.waitForFunction(() => document.querySelectorAll('#hm-fabrics li').length === 1);
+    check(!(await txt('#hm-fabrics')).includes('Nhà cũ'), 'one ecosystem removed on the device side');
+    check(await page.locator('#hm-remove-all').isVisible(), '"leave all" offered while an ecosystem is left');
     await shot('03-home');
 
     // ---------------------------------------------------------------- Sensor
@@ -158,6 +175,17 @@ function check(cond, what) {
     await page.waitForFunction(() => document.querySelectorAll('#dg-errors li').length === 1);
     check((await txt('#dg-fw')).includes('1.6.1'), 'esp_matter version shown');
     check((await txt('#dg-matter')).includes('5542'), 'commissioner UDP port shown');
+    check((await txt('#dg-ota')).includes('ota_1'), 'update slot shown');
+    // firmware update: refused files (nothing changes on the device)
+    await page.click('#ota-start');
+    check((await txt('#ota-msg')).startsWith('Hãy chọn file'), 'update without a file refused');
+    await page.setInputFiles('#ota-file', { name: 'ac_matter_ir_v9.9.9_full_0x0.bin', mimeType: 'application/octet-stream', buffer: fwImage('ac_matter_ir', '9.9.9') });
+    await page.click('#ota-start');
+    check((await txt('#ota-msg')).startsWith('Đây là file full'), 'full image refused before uploading');
+    await page.setInputFiles('#ota-file', { name: 'other_app_0x40000.bin', mimeType: 'application/octet-stream', buffer: fwImage('other_project', '1.0.0') });
+    await page.click('#ota-start');
+    await page.waitForFunction(() => document.getElementById('ota-msg').textContent.includes('không phải firmware của thiết bị này'));
+    check(await page.locator('#ota-start').isEnabled(), 'firmware of another project refused by the device, page usable again');
     await shot('08-diag');
 
     // ---------------------------------------------------------------- Overview after binding
@@ -170,6 +198,31 @@ function check(cond, what) {
     await page.waitForSelector('#banner-closed:not([hidden])');
     check(true, 'exit closes the portal');
     await shot('09-exit');
+
+    // ---------------------------------------------------------------- Leave all homes, update, factory reset
+    // (each of these ends the page's polling, so the page is loaded again in between)
+    await page.goto(base);
+    await page.click('#tabs button[data-page=home]');
+    await page.waitForFunction(() => document.querySelectorAll('#hm-fabrics li button').length === 1);
+    await page.click('#hm-remove-all');
+    await page.waitForFunction(() => document.getElementById('hm-fabrics').textContent.includes('Chưa thuộc hệ sinh thái nào'));
+    check(!(await page.locator('#hm-remove-all').isVisible()), 'left all home ecosystems');
+
+    await page.click('#tabs button[data-page=diag]');
+    await page.waitForFunction(() => document.getElementById('dg-ota').textContent.includes('ota_1'));
+    await page.setInputFiles('#ota-file', { name: 'ac_matter_ir_v9.9.9_app_0x40000.bin', mimeType: 'application/octet-stream', buffer: fwImage('ac_matter_ir', '9.9.9') });
+    await page.click('#ota-start');
+    await page.waitForFunction(() => document.getElementById('ota-msg').textContent.startsWith('Đã ghi firmware 9.9.9'), null, { timeout: 15000 });
+    check((await txt('#ota-msg')).includes('v9.9.9'), 'firmware uploaded, new version and new Wi-Fi name announced');
+    await shot('10-update');
+
+    await page.goto(base);
+    await page.click('#tabs button[data-page=diag]');
+    await page.waitForFunction(() => document.getElementById('dg-fw').textContent.includes('9.9.9'));
+    check(true, 'device reports the new firmware version');
+    await page.click('#dg-freset'); /* two confirmations (a sensor is paired): accepted by the dialog handler */
+    await page.waitForFunction(() => document.getElementById('toast').textContent.startsWith('Đang đặt lại gốc'));
+    check(true, 'factory reset requested (with a paired sensor: second confirmation)');
   } catch (e) {
     errors.push(e.message);
   }

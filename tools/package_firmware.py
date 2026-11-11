@@ -5,9 +5,12 @@ Run from the ESP-IDF terminal after `idf.py build`:
 
     python tools/package_firmware.py
 
-Creates in firmware/ (version = PROJECT_VER of the build, e.g. 1.2.0):
-    ac_matter_ir_v1.2.0_full_0x0.bin       merged image, flash at 0x0 (first flash, erases NVS)
-    ac_matter_ir_v1.2.0_app_0x40000.bin    application only, flash at 0x40000 (keeps NVS data)
+Creates in firmware/ (version = PROJECT_VER of the build, e.g. 1.5.0):
+    ac_matter_ir_v1.5.0_full_0x0.bin        merged image, flash at 0x0 (first flash, erases NVS)
+    ac_matter_ir_v1.5.0_app_0x40000.bin     application only: upload on the web page, or flash at
+                                            0x40000 (keeps NVS data)
+    ac_matter_ir_v1.5.0_bootloader_0x0.bin  bootloader only, flash at 0x0 (keeps NVS data): gives a board
+                                            first flashed before v1.5.0 the rollback of failed updates
 removes the images of other versions, and prints the SHA-256 lines for firmware/README.md.
 """
 import glob
@@ -34,17 +37,19 @@ def main() -> int:
     name = desc["project_name"]
     full = f"{name}_v{version}_full_0x0.bin"
     app = f"{name}_v{version}_app_0x40000.bin"
+    boot = f"{name}_v{version}_bootloader_0x0.bin"
 
     for old in glob.glob(os.path.join(OUT, f"{name}_*.bin")):
-        if os.path.basename(old) not in (full, app):
+        if os.path.basename(old) not in (full, app, boot):
             os.remove(old)
 
     subprocess.run([sys.executable, "-m", "esptool", "--chip", desc.get("target", "esp32s3"), "merge-bin",
                     "-o", os.path.join(OUT, full), "@flash_args"], cwd=BUILD, check=True)
     shutil.copyfile(os.path.join(BUILD, f"{name}.bin"), os.path.join(OUT, app))
+    shutil.copyfile(os.path.join(BUILD, "bootloader", "bootloader.bin"), os.path.join(OUT, boot))
 
     print(f"\nfirmware v{version}, SHA-256:")
-    for fn in (full, app):
+    for fn in (full, app, boot):
         with open(os.path.join(OUT, fn), "rb") as f:
             print(f"- `{hashlib.sha256(f.read()).hexdigest()}`  {fn}")
     return 0

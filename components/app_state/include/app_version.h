@@ -7,9 +7,9 @@
  *
  * Every name the device publishes carries the version suffix, so a phone, a Wi-Fi list or a home
  * app always shows which firmware runs on the device:
- *   APP_DEVICE_FULL_NAME   "May lanh IR v1.4.0"  Matter ProductName, NodeLabel, DNS-SD DN, web page
- *   SoftAP SSID            "AC-Matter-1A2B-v1.4.0"   (wifi_config.c)
- *   BLE name               "AC-1A2B-v1.4.0"          (matter_thermostat.cpp, 15 characters max)
+ *   APP_DEVICE_FULL_NAME   "May lanh IR v1.5.0"  Matter ProductName, NodeLabel, DNS-SD DN, web page
+ *   SoftAP SSID            "AC-Matter-1A2B-v1.5.0"   (wifi_config.c)
+ *   BLE name               "AC-1A2B-v1.5.0"          (matter_thermostat.cpp, 15 characters max)
  * The Matter names are also defined in main/matter_project_config.h for CHIP (same expression).
  */
 

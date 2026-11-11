@@ -132,6 +132,42 @@ typedef struct {
 void climate_user_from_remote(const ac_state_t *remote, const climate_offer_t *offer, climate_user_t *user,
                               climate_remote_result_t *res);
 
+/* ---- What is known about the AC, and whether a command has to go out ----
+ *
+ * An IR link is one way: the state of the AC is never read back.
+ *   ref     the desired state for which nothing more has to be sent: the last command transmitted, the
+ *           state set with the original remote or - when nothing is known (first boot, new profile,
+ *           thermostat changed while the device was off) - the thermostat state itself;
+ *   actual  the state the AC was really put in (transmitted or read from the remote), the "previous
+ *           state" of protocols that toggle settings. Absent while it is only assumed.
+ * Nothing is ever transmitted because the state is unknown: a command goes out only when the desired
+ * state changes afterwards (user, compensation) or when a re-send is forced.
+ */
+typedef struct {
+    bool user_known;   /* the thermostat reported its restored state; nothing is sent before that */
+    bool has_ref;
+    bool has_actual;
+    ac_state_t ref;
+    ac_state_t actual;
+} climate_link_t;
+
+void climate_link_init(climate_link_t *l);
+/** State the AC was last put in, from persistent storage (before the thermostat reports). */
+void climate_link_restore(climate_link_t *l, bool has_actual, const ac_state_t *actual);
+/** The thermostat reported its state at boot and asks for `desired`. Never causes a transmission:
+ *  a missing reference, or one that does not match, is replaced by `desired`. */
+void climate_link_boot(climate_link_t *l, const ac_state_t *desired);
+/** The state of the AC became unknown (another profile): assume `desired`, forget `actual`. */
+void climate_link_assume(climate_link_t *l, const ac_state_t *desired);
+/** The AC was put in `actual` for `desired` (command transmitted, or original remote observed). */
+void climate_link_confirm(climate_link_t *l, const ac_state_t *desired, const ac_state_t *actual);
+/** `desired` cannot be transmitted (no command for it): do not try again until it changes. */
+void climate_link_skip(climate_link_t *l, const ac_state_t *desired);
+/** True if a command for `desired` has to be transmitted (`force`: explicit re-send). */
+bool climate_link_needs_send(const climate_link_t *l, const ac_state_t *desired, bool force);
+/** State the AC is really in, for protocols that toggle settings; NULL when it is not known. */
+const ac_state_t *climate_link_prev(const climate_link_t *l);
+
 /** Round a temperature to the AC step (ties: up for cooling, down for heating). */
 int16_t climate_quantize(int16_t centi, uint8_t step_half, bool heating);
 

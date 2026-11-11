@@ -134,6 +134,15 @@ esp_err_t matter_thermostat_get_onboarding(char *qr, size_t qr_len, char *manual
 /** Up to max home fabrics (excluding Fabric B). Returns the count copied. */
 size_t matter_thermostat_list_home_fabrics(matter_fabric_info_t *out, size_t max);
 
+/**
+ * Leave one home ecosystem / all of them on the device side (for a hub that is gone, or to hand the
+ * device over): the fabric is deleted here exactly as its RemoveFabric command would do, the hub is
+ * told with the Leave event when it is reachable. Fabric B (sensor), Wi-Fi, profiles and settings are
+ * kept. When no home fabric is left the commissioning window opens again. Any task, non blocking.
+ */
+esp_err_t matter_thermostat_remove_home_fabric(uint8_t fabric_index);
+esp_err_t matter_thermostat_remove_all_home_fabrics(void);
+
 #ifdef __cplusplus
 }
 #endif

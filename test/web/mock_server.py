@@ -28,7 +28,9 @@ STATE = {
              "job": 0, "job_message": "", "scanning": False},
     "scan": [],
     "scan_until": 0,
-    "fabrics": [{"index": 1, "vendor_id": 0x1349, "label": ""}],
+    "fabrics": [{"index": 1, "vendor_id": 0x1349, "label": ""}, {"index": 3, "vendor_id": 0x6006, "label": "Nhà cũ"}],
+    "ota": {"version": "1.0.0", "uploads": 0},
+    "factory_reset": False,
     "window_open": False,
     "binding": None,
     "pair": {"state": 0, "t": 0, "node": 0x1A2B3C4D5E6F7081},
@@ -262,8 +264,10 @@ def route(method, path, q, f):
         if path == "config":
             return {"config": s["config"], "local_configured": False, "climate": climate()}
         if path == "diag":
-            return {"firmware": {"project": "ac_matter_ir", "version": "1.0.0", "idf": "v6.0.2",
+            return {"firmware": {"project": "ac_matter_ir", "version": s["ota"]["version"], "idf": "v6.0.2",
                                  "esp_matter": "1.6.1", "date": "Oct 29 2026", "time": "05:47:00", "test_mode": True},
+                    "ota": {"running": "ota_0", "next": "ota_1", "max_size": 4194304, "trial": False},
+                    "sensor_bound": s["binding"] is not None,
                     "chip": {"model": 9, "revision": 2, "cores": 2, "flash": 16777216, "psram": 8388608,
                              "mac": "AA:BB:CC:11:22:33"},
                     "uptime_s": int(time.time() - T0) + 3600, "reset_reason": "Cấp nguồn",
@@ -433,6 +437,21 @@ def route(method, path, q, f):
         return {"config": c}
     if path == "system/reboot":
         return {"message": "Thiết bị đang khởi động lại..."}
+    if path == "matter/fabric/remove":
+        if g("all") == "1":
+            s["fabrics"] = []
+            return {"message": "Đang rời khỏi tất cả ứng dụng nhà. Chế độ ghép sẽ tự bật lại"}
+        require(g("index") is not None, 400, "Thiếu hệ sinh thái cần gỡ")
+        left = [fb for fb in s["fabrics"] if fb["index"] != int(g("index"))]
+        require(len(left) != len(s["fabrics"]), 404, "Hệ sinh thái này không còn trên thiết bị")
+        s["fabrics"] = left
+        return {"message": "Đang rời khỏi ứng dụng nhà đã chọn"}
+    if path == "system/factory_reset":
+        require(g("confirm") == "1", 400, "Thiếu xác nhận đặt lại gốc")
+        require(s["binding"] is None or g("force") == "1", 409,
+                "Đang ghép một cảm biến: hãy gỡ cảm biến ở trang Cảm biến trước")
+        s["factory_reset"] = True
+        return {"message": "Đang đặt lại gốc, thiết bị sẽ khởi động lại..."}
     raise Fail(404, "API không tồn tại")
 
 
@@ -489,9 +508,33 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def handle_ota(self):
+        """Same checks as the device: token, raw body, application image of this project."""
+        n = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(n)
+        try:
+            require(self.headers.get("X-CSRF-Token") == TOKEN, 403, "Phiên không hợp lệ: hãy tải lại trang")
+            require(self.headers.get("Content-Type", "").startswith("application/octet-stream"), 400,
+                    "Content-Type không được hỗ trợ")
+            require(128 * 1024 <= n <= 4194304, 413, "Kích thước file không hợp lệ cho phân vùng cập nhật")
+            # esp_image_header_t (24) + segment header (8) + esp_app_desc_t: magic, secure_version, reserved[2],
+            # version[32], project_name[32]
+            ok = body[0] == 0xE9 and body[32:36] == bytes.fromhex("3254cdab")
+            require(ok, 400, "Không phải file firmware ứng dụng: hãy chọn file ..._app_0x40000.bin (không phải file full)")
+            project = body[80:112].split(b"\0")[0].decode()
+            require(project == "ac_matter_ir", 400, "File không phải firmware của thiết bị này")
+            STATE["ota"]["version"] = body[48:80].split(b"\0")[0].decode()
+            STATE["ota"]["uploads"] += 1
+            self.send_json(200, {"ok": True, "version": STATE["ota"]["version"],
+                                 "message": "Đã ghi firmware mới. Thiết bị đang khởi động lại..."})
+        except Fail as e:
+            self.send_json(e.status, {"ok": False, "error": e.msg})
+
     def do_POST(self):
         if self.path.startswith("/api/"):
             return self.handle_api("POST")
+        if self.path == "/ota":
+            return self.handle_ota()
         self.send_response(405)
         self.end_headers()
 

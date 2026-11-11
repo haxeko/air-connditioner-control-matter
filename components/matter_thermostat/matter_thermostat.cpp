@@ -12,6 +12,7 @@
 #include <app/clusters/fan-control-server/FanControlCluster.h>
 #include <app/server/CommissioningWindowManager.h>
 #include <app/server/Server.h>
+#include <lib/support/CodeUtils.h>
 #include <platform/CHIPDeviceLayer.h>
 #include <platform/DeviceInstanceInfoProvider.h>
 #include <setup_payload/OnboardingCodesUtil.h>
@@ -219,20 +220,37 @@ void SyncPowerAndFanWork(intptr_t)
     SyncPowerAndFan();
 }
 
+/* SetModeWork argument for "turn on": the last mode that was not Off, looked up when the work runs.
+ * A mode captured when the On command arrived could overwrite a SystemMode write of the same
+ * controller that was processed in between (On followed at once by SystemMode = Cool). */
+constexpr intptr_t kModeLastOn = -1;
+
 /* CHIP thread (scheduled, never from inside an attribute callback). */
-void SetModeWork(intptr_t mode)
+void SetModeWork(intptr_t arg)
 {
-    if (CurrentMode() == static_cast<uint8_t>(mode)) {
-        SyncPowerAndFan(); /* e.g. On while already on: just show the real state */
+    uint8_t mode;
+    if (arg == kModeLastOn) {
+        if (CurrentMode() != TSTAT_MODE_OFF) {
+            SyncPowerAndFan(); /* already on, possibly by a SystemMode write that got here first: keep it */
+            return;
+        }
+        Guard g;
+        mode = sLastOnMode;
+    } else {
+        mode = static_cast<uint8_t>(arg);
+    }
+    if (CurrentMode() == mode) {
+        SyncPowerAndFan(); /* e.g. Off while already off: just show the real state */
         return;
     }
-    esp_matter_attr_val_t v = esp_matter_enum8(static_cast<uint8_t>(mode));
+    esp_matter_attr_val_t v = esp_matter_enum8(mode);
     if (attribute::update(sEndpointId, Thermostat::Id, Thermostat::Attributes::SystemMode::Id, &v) != ESP_OK) {
         SyncPowerAndFan(); /* rejected: put On/Off and the fan back */
     }
 }
 
-void ScheduleMode(uint8_t mode)
+/* `mode`: a tstat_mode_t value or kModeLastOn. */
+void ScheduleMode(intptr_t mode)
 {
     LogErrorOnFailure(chip::DeviceLayer::PlatformMgr().ScheduleWork(SetModeWork, mode));
 }
@@ -288,7 +306,7 @@ public:
         ESP_LOGI(TAG, "fan from Matter: %s", ac_fan_name(fan));
         NotifyFan();
         if (CurrentMode() == TSTAT_MODE_OFF) {
-            ScheduleMode(sLastOnMode); /* choosing a fan speed turns the AC on */
+            ScheduleMode(kModeLastOn); /* choosing a fan speed turns the AC on */
         }
     }
 
@@ -320,7 +338,7 @@ esp_err_t AttributeCallback(attribute::callback_type_t type, uint16_t endpoint_i
         /* only commands from controllers: not our own sync, not the restore while the stack starts */
         if (type == attribute::POST_UPDATE && attribute_id == OnOff::Attributes::OnOff::Id && !sSyncing && !sRestoring &&
             sStarted) {
-            ScheduleMode(val->val.b ? sLastOnMode : static_cast<uint8_t>(TSTAT_MODE_OFF));
+            ScheduleMode(val->val.b ? kModeLastOn : static_cast<intptr_t>(TSTAT_MODE_OFF));
         }
         return ESP_OK;
     }
@@ -347,27 +365,37 @@ esp_err_t AttributeCallback(attribute::callback_type_t type, uint16_t endpoint_i
     if (type != attribute::POST_UPDATE) {
         return ESP_OK;
     }
+    /* esp-matter also runs POST_UPDATE when a controller writes the value the attribute already has
+     * (a scene or automation repeating itself): that is not a user change, the climate controller
+     * must not restart its debounce / compensation interval for it. */
     uint32_t mask = 0;
+    const bool modeWritten = attribute_id == Thermostat::Attributes::SystemMode::Id;
     {
         Guard g;
-        if (attribute_id == Thermostat::Attributes::SystemMode::Id) {
-            sUser.system_mode = val->val.u8;
+        if (modeWritten) {
+            if (sUser.system_mode != val->val.u8) {
+                sUser.system_mode = val->val.u8;
+                mask = TSTAT_CHANGED_MODE;
+            }
             if (val->val.u8 != TSTAT_MODE_OFF) {
                 sLastOnMode = val->val.u8;
             }
-            mask = TSTAT_CHANGED_MODE;
         } else if (attribute_id == Thermostat::Attributes::OccupiedCoolingSetpoint::Id) {
-            sUser.cool_setpoint = val->val.i16;
-            mask = TSTAT_CHANGED_COOL_SP;
+            if (sUser.cool_setpoint != val->val.i16) {
+                sUser.cool_setpoint = val->val.i16;
+                mask = TSTAT_CHANGED_COOL_SP;
+            }
         } else if (attribute_id == Thermostat::Attributes::OccupiedHeatingSetpoint::Id) {
-            sUser.heat_setpoint = val->val.i16;
-            mask = TSTAT_CHANGED_HEAT_SP;
+            if (sUser.heat_setpoint != val->val.i16) {
+                sUser.heat_setpoint = val->val.i16;
+                mask = TSTAT_CHANGED_HEAT_SP;
+            }
         }
     }
     if (mask && !sRestoring && !sFromRemote) {
         NotifyUser(mask);
     }
-    if (mask == TSTAT_CHANGED_MODE && sStarted) {
+    if (modeWritten && sStarted) {
         LogErrorOnFailure(chip::DeviceLayer::PlatformMgr().ScheduleWork(SyncPowerAndFanWork, 0)); /* On/Off + fan follow the mode */
     }
     return ESP_OK;
@@ -650,6 +678,44 @@ void CloseWindowWork(intptr_t)
     auto & mgr = chip::Server::GetInstance().GetCommissioningWindowManager();
     if (mgr.IsCommissioningWindowOpen()) {
         mgr.CloseCommissioningWindow();
+    }
+}
+
+constexpr intptr_t kAllHomeFabrics = -1;
+
+/* CHIP thread. `arg`: one fabric index, or kAllHomeFabrics. This device's own Fabric B is never
+ * touched. Same steps as the RemoveFabric command of the Operational Credentials cluster: the fabric
+ * table delegates emit the Leave event, drop the fabric's ACL, group keys and resumption state,
+ * withdraw its DNS-SD advertisement and post kFabricRemoved (AppEventCallback then reopens the
+ * commissioning window when no home fabric is left); the sessions are expired here. */
+void RemoveHomeFabricsWork(intptr_t arg)
+{
+    chip::FabricTable & table = chip::Server::GetInstance().GetFabricTable();
+    const uint8_t fabricB     = FabricBIndex();
+    chip::FabricIndex victims[CHIP_CONFIG_MAX_FABRICS];
+    size_t n = 0;
+    for (const auto & fb : table) {
+        const chip::FabricIndex index = fb.GetFabricIndex();
+        if (index == fabricB || n >= MATTER_ARRAY_SIZE(victims)) {
+            continue;
+        }
+        if (arg == kAllHomeFabrics || arg == static_cast<intptr_t>(index)) {
+            victims[n++] = index;
+        }
+    }
+    if (n == 0) {
+        ESP_LOGI(TAG, "no home fabric to remove");
+        OpenWindowIfUncommissioned();
+        return;
+    }
+    for (size_t i = 0; i < n; i++) {
+        CHIP_ERROR err = table.Delete(victims[i]);
+        if (err != CHIP_NO_ERROR) {
+            app_log_error("thermostat", "removing home fabric %u: %s", victims[i], err.AsString());
+            continue;
+        }
+        chip::Server::GetInstance().GetSecureSessionManager().ExpireAllSessionsForFabric(victims[i]);
+        ESP_LOGI(TAG, "home fabric %u removed on this device", victims[i]);
     }
 }
 
@@ -966,6 +1032,27 @@ extern "C" esp_err_t matter_thermostat_close_commissioning_window(void)
         return ESP_ERR_INVALID_STATE;
     }
     return chip::DeviceLayer::PlatformMgr().ScheduleWork(CloseWindowWork, 0) == CHIP_NO_ERROR ? ESP_OK : ESP_FAIL;
+}
+
+extern "C" esp_err_t matter_thermostat_remove_home_fabric(uint8_t fabric_index)
+{
+    if (!sStarted) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (fabric_index == chip::kUndefinedFabricIndex || fabric_index == FabricBIndex()) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return chip::DeviceLayer::PlatformMgr().ScheduleWork(RemoveHomeFabricsWork, fabric_index) == CHIP_NO_ERROR ? ESP_OK
+                                                                                                             : ESP_FAIL;
+}
+
+extern "C" esp_err_t matter_thermostat_remove_all_home_fabrics(void)
+{
+    if (!sStarted) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return chip::DeviceLayer::PlatformMgr().ScheduleWork(RemoveHomeFabricsWork, kAllHomeFabrics) == CHIP_NO_ERROR ? ESP_OK
+                                                                                                                : ESP_FAIL;
 }
 
 extern "C" esp_err_t matter_thermostat_get_onboarding(char * qr, size_t qr_len, char * manual, size_t manual_len)

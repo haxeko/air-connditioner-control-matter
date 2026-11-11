@@ -53,8 +53,86 @@ static const char *run(const seg_t *segs, size_t n)
         run(s_, sizeof(s_) / sizeof(s_[0]));                                                         \
     })
 
+/* ------------------------------------------------------------------ long holds */
+
+static const hold_detector_cfg_t k_hold = { .debounce_ms = 40, .stage1_ms = 10000, .stage2_ms = 20000 };
+
+/* Feed `ms` of a constant level in 5 ms samples; events are appended to s_out as digits. */
+static void hold_run(hold_detector_t *d, int64_t *t, bool pressed, int ms)
+{
+    for (int k = 0; k < ms; k += 5, *t += 5) {
+        hold_event_t ev = hold_detector_feed(d, pressed, *t);
+        if (ev != HOLD_NONE) {
+            size_t l = strlen(s_out);
+            snprintf(s_out + l, sizeof(s_out) - l, "%d", (int)ev);
+        }
+    }
+}
+
+static void test_hold_detector(void)
+{
+    hold_detector_t d;
+    int64_t t = 1000;
+
+    /* short and medium presses: nothing */
+    hold_detector_init(&d, &k_hold);
+    s_out[0] = 0;
+    hold_run(&d, &t, false, 200);
+    hold_run(&d, &t, true, 300);
+    hold_run(&d, &t, false, 300);
+    hold_run(&d, &t, true, 9900);
+    hold_run(&d, &t, false, 300);
+    CHECK_STR(s_out, "");
+
+    /* 12 s then release: stage 1 reached, then "released after stage 1" */
+    hold_run(&d, &t, true, 12000);
+    CHECK_STR(s_out, "1");
+    hold_run(&d, &t, false, 300);
+    CHECK_STR(s_out, "12");
+
+    /* 25 s: stage 1, stage 2, and nothing at the release */
+    s_out[0] = 0;
+    hold_run(&d, &t, true, 25000);
+    hold_run(&d, &t, false, 500);
+    CHECK_STR(s_out, "13");
+
+    /* contact bounce during the hold does not restart it; a real release does */
+    s_out[0] = 0;
+    hold_run(&d, &t, true, 6000);
+    hold_run(&d, &t, false, 20); /* bounce shorter than the debounce time */
+    hold_run(&d, &t, true, 4100);
+    CHECK_STR(s_out, "1");
+    hold_run(&d, &t, false, 300);
+    s_out[0] = 0;
+    hold_run(&d, &t, true, 6000);
+    hold_run(&d, &t, false, 200); /* released: the count starts again */
+    hold_run(&d, &t, true, 6000);
+    hold_run(&d, &t, false, 200);
+    CHECK_STR(s_out, "");
+
+    /* button held (or stuck) from power-up: never counts, even after 60 s ... */
+    hold_detector_init(&d, &k_hold);
+    s_out[0] = 0;
+    hold_run(&d, &t, true, 60000);
+    CHECK_STR(s_out, "");
+    /* ... until it has been released once */
+    hold_run(&d, &t, false, 200);
+    hold_run(&d, &t, true, 10100);
+    CHECK_STR(s_out, "1");
+
+    /* the task does not sample while the button is idle: one sample at start-up, then nothing
+     * until the press. The idle time in between still arms the detector. */
+    hold_detector_init(&d, &k_hold);
+    s_out[0] = 0;
+    CHECK_EQ(hold_detector_feed(&d, false, t), HOLD_NONE);
+    t += 3600000;
+    hold_run(&d, &t, true, 21000);
+    CHECK_STR(s_out, "13");
+}
+
 void test_press_detector(void)
 {
+    test_hold_detector();
     /* three short presses within 1.5 s: portal, reported at the third release (no waiting) */
     CHECK_STR(RUN(R(100), P(100), R(150), P(100), R(150), P(100), R(10)), "3");
     CHECK(s_report_time[0] < 1000 + 100 + 100 + 150 + 100 + 150 + 100 + 60);

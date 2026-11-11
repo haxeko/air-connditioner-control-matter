@@ -145,6 +145,12 @@ static void out_write(rgb_t c)
 /* Called with s_lock held. */
 static rgb_t current_colour(void)
 {
+    if (s_flags & STATUS_LED_RESET_NOW) {
+        return k_red;
+    }
+    if (s_flags & STATUS_LED_RESET_ARMED) {
+        return (s_tick % 2) == 0 ? k_red : k_off; /* 0.1 s on / 0.1 s off */
+    }
     if (s_event == STATUS_LED_EVENT_PAIRED) {
         return k_green;
     }

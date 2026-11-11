@@ -349,8 +349,79 @@ static void test_remote_no_resend(void)
     }
 }
 
+/* The device never transmits just because it does not know the state of the AC. */
+static void test_link(void)
+{
+    const ac_state_t off = { 0, 0, 0, 0, 0 };
+    const ac_state_t cool24 = { 1, AC_MODE_COOL, 48, AC_FAN_AUTO, AC_SWING_OFF };
+    const ac_state_t cool26 = { 1, AC_MODE_COOL, 52, AC_FAN_AUTO, AC_SWING_OFF };
+    const ac_state_t cool25 = { 1, AC_MODE_COOL, 50, AC_FAN_AUTO, AC_SWING_OFF };
+    climate_link_t l;
+
+    /* before the thermostat reported its state: nothing, not even a forced re-send */
+    climate_link_init(&l);
+    CHECK(!climate_link_needs_send(&l, &off, false));
+    CHECK(!climate_link_needs_send(&l, &cool24, true));
+    CHECK(climate_link_prev(&l) == NULL);
+
+    /* first boot (no history), thermostat Off while the AC may be running: no Off is transmitted */
+    climate_link_boot(&l, &off);
+    CHECK(!climate_link_needs_send(&l, &off, false));
+    CHECK(climate_link_prev(&l) == NULL); /* state only assumed: unknown for toggle protocols */
+    /* ... until the user changes something */
+    CHECK(climate_link_needs_send(&l, &cool24, false));
+    climate_link_confirm(&l, &cool24, &cool24);
+    CHECK(!climate_link_needs_send(&l, &cool24, false));
+    CHECK(climate_link_prev(&l) != NULL && ac_state_equal(climate_link_prev(&l), &cool24));
+    CHECK(climate_link_needs_send(&l, &cool24, true)); /* explicit re-send */
+
+    /* another profile: state unknown again, nothing is sent for the unchanged thermostat state */
+    climate_link_assume(&l, &cool24);
+    CHECK(!climate_link_needs_send(&l, &cool24, false));
+    CHECK(climate_link_prev(&l) == NULL);
+    CHECK(climate_link_needs_send(&l, &off, false));
+
+    /* normal boot: history matches the thermostat -> no send, previous state known */
+    climate_link_init(&l);
+    climate_link_restore(&l, true, &cool24);
+    climate_link_boot(&l, &cool24);
+    CHECK(!climate_link_needs_send(&l, &cool24, false));
+    CHECK(climate_link_prev(&l) != NULL);
+
+    /* boot after the thermostat changed while the history was not saved (power cut): still no
+     * transmission at boot; the AC is assumed to be where the last command put it */
+    climate_link_init(&l);
+    climate_link_restore(&l, true, &cool24);
+    climate_link_boot(&l, &cool26);
+    CHECK(!climate_link_needs_send(&l, &cool26, false));
+    CHECK(climate_link_prev(&l) != NULL && ac_state_equal(climate_link_prev(&l), &cool24));
+    CHECK(climate_link_needs_send(&l, &off, false));
+
+    /* invalid stored state is ignored */
+    const ac_state_t bad = { 1, AC_MODE_COUNT, 48, 0, 0 };
+    climate_link_init(&l);
+    climate_link_restore(&l, true, &bad);
+    CHECK(climate_link_prev(&l) == NULL);
+
+    /* a state without command is not retried, and the AC keeps its real previous state */
+    climate_link_init(&l);
+    climate_link_boot(&l, &off);
+    climate_link_confirm(&l, &cool24, &cool24);
+    CHECK(climate_link_needs_send(&l, &cool25, false));
+    climate_link_skip(&l, &cool25);
+    CHECK(!climate_link_needs_send(&l, &cool25, false));
+    CHECK(ac_state_equal(climate_link_prev(&l), &cool24));
+
+    /* original remote: the AC is in the remote's state, shown as `desired` (may differ, e.g. Auto) */
+    const ac_state_t auto24 = { 1, AC_MODE_AUTO, 48, AC_FAN_AUTO, AC_SWING_OFF };
+    climate_link_confirm(&l, &cool24, &auto24);
+    CHECK(!climate_link_needs_send(&l, &cool24, false));
+    CHECK(ac_state_equal(climate_link_prev(&l), &auto24));
+}
+
 void test_climate_algo(void)
 {
+    test_link();
     test_quantize();
     test_off_and_direct();
     test_compensation();
